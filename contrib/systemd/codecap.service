@@ -1,0 +1,9 @@
+[Unit]
+Description=codecap session helper
+
+[Service]
+Type=dbus
+BusName=dev.codecap.Helper
+ExecStart=/usr/bin/codecap
+Restart=on-failure
+RestartSec=2
