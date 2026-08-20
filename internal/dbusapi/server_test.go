@@ -16,8 +16,9 @@ import (
 
 func TestGetSnapshotFillsConsumedUsageForSignedInAccountHome(t *testing.T) {
 	accountHome := t.TempDir()
-	if err := os.WriteFile(filepath.Join(accountHome, "login"), []byte{}, 0o600); err != nil {
-		t.Fatalf("create login sentinel: %v", err)
+	creds := `{"claudeAiOauth":{"accessToken":"sk-ant-oat01-test","refreshToken":"refresh","expiresAt":9999999999999}}`
+	if err := os.WriteFile(filepath.Join(accountHome, ".credentials.json"), []byte(creds), 0o600); err != nil {
+		t.Fatalf("create credentials: %v", err)
 	}
 
 	logDir := filepath.Join(accountHome, "projects", "demo")
