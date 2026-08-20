@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=dev.codecap.Helper
+Exec=/usr/bin/codecap
