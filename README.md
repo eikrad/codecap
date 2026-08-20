@@ -21,8 +21,17 @@ go run ./cmd/codecap
 ## Manual smoke
 
 ```bash
+go run ./cmd/codecap
 busctl --user call dev.codecap.Helper /dev/codecap/Helper dev.codecap.Helper GetSnapshot ssi "$HOME/.claude" "Europe/Copenhagen" 1
+busctl --user call dev.codecap.Helper /dev/codecap/Helper dev.codecap.Helper GetSnapshot ssi "" "Europe/Copenhagen" 1
+kpackagetool6 --type Plasma/Applet --install ./plasmoid
 ```
+
+Then add the `codecap` widget in Plasma:
+
+- empty Account Home → Unbound placeholder
+- helper stopped → Unknown Allowance
+- helper running with Account Home set → shows returned face JSON
 
 ## License
 
