@@ -6,11 +6,14 @@ package dbusapi
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/eikrad/codecap/internal/allowance"
 	"github.com/eikrad/codecap/internal/snapshot"
 )
 
@@ -49,6 +52,56 @@ func TestGetSnapshotFillsConsumedUsageForSignedInAccountHome(t *testing.T) {
 	}
 	if snap.FetchedAt == 0 {
 		t.Fatal("expected fetched_at to be set")
+	}
+}
+
+func TestGetSnapshotFillsAllowanceWhenVendorFetchSucceeds(t *testing.T) {
+	accountHome := t.TempDir()
+	creds := fmt.Sprintf(`{"claudeAiOauth":{"accessToken":"sk-ant-oat01-test","refreshToken":"refresh","expiresAt":%d}}`, time.Now().Add(time.Hour).UnixMilli())
+	if err := os.WriteFile(filepath.Join(accountHome, ".credentials.json"), []byte(creds), 0o600); err != nil {
+		t.Fatalf("create credentials: %v", err)
+	}
+
+	usageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"five_hour": map[string]any{"utilization": 19.0, "resets_at": "2026-08-20T22:00:00Z"},
+			"seven_day": map[string]any{"utilization": 51.0, "resets_at": "2026-08-27T22:00:00Z"},
+			"extra_usage": map[string]any{
+				"is_enabled":    true,
+				"utilization":   5.0,
+				"used_credits":  5.0,
+				"monthly_limit": 100.0,
+			},
+		})
+	}))
+	t.Cleanup(usageServer.Close)
+
+	svc := allowance.NewService(allowance.NewLastKnownStore(t.TempDir()))
+	svc.HTTPClient = usageServer.Client()
+	svc.APIBaseURL = usageServer.URL
+	svc.TokenBaseURL = usageServer.URL
+
+	server := &Server{allowance: svc}
+	payload, derr := server.GetSnapshot(accountHome, "UTC", 1)
+	if derr != nil {
+		t.Fatalf("GetSnapshot failed: %v", derr)
+	}
+
+	var snap snapshot.Snapshot
+	if err := json.Unmarshal([]byte(payload), &snap); err != nil {
+		t.Fatalf("unmarshal snapshot: %v", err)
+	}
+	if snap.Face != snapshot.FaceReady {
+		t.Fatalf("expected ready, got %q", snap.Face)
+	}
+	if snap.SessionAllowance.UsedPercent != 19.0 {
+		t.Fatalf("session allowance: %+v", snap.SessionAllowance)
+	}
+	if snap.WeeklyAllowance.UsedPercent != 51.0 {
+		t.Fatalf("weekly allowance: %+v", snap.WeeklyAllowance)
+	}
+	if snap.UsageCredit != "enabled" {
+		t.Fatalf("usage credit: %q", snap.UsageCredit)
 	}
 }
 

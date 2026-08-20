@@ -98,6 +98,31 @@ func EnsureAccessToken(accountHome string, httpClient *http.Client, tokenBaseURL
 	return refreshed, nil
 }
 
+// RefreshAccessToken forces an OAuth refresh and rewrites Account Home credentials.
+func RefreshAccessToken(accountHome string, httpClient *http.Client, tokenBaseURL string) (OAuth, error) {
+	unlock, err := lockCredentials(accountHome)
+	if err != nil {
+		return OAuth{}, err
+	}
+	defer unlock()
+
+	oauth, err := Load(accountHome)
+	if err != nil {
+		return OAuth{}, err
+	}
+	if strings.TrimSpace(oauth.RefreshToken) == "" {
+		return OAuth{}, fmt.Errorf("credentials missing refreshToken")
+	}
+	refreshed, err := refreshOAuth(httpClient, tokenBaseURL, oauth.RefreshToken)
+	if err != nil {
+		return OAuth{}, err
+	}
+	if err := saveOAuthTokens(accountHome, refreshed); err != nil {
+		return OAuth{}, err
+	}
+	return refreshed, nil
+}
+
 func refreshOAuth(httpClient *http.Client, tokenBaseURL, refreshToken string) (OAuth, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
