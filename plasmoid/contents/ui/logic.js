@@ -1,5 +1,19 @@
 .pragma library
 
+function expandPath(path, homeDir) {
+    var trimmed = (path || "").trim()
+    if (trimmed === "") {
+        return ""
+    }
+    if (trimmed === "~") {
+        return homeDir || ""
+    }
+    if (trimmed.indexOf("~/") === 0) {
+        return (homeDir || "") + trimmed.substring(1)
+    }
+    return trimmed
+}
+
 function emptySnapshot() {
     return {
         face: "unbound",

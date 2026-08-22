@@ -12,8 +12,8 @@ Item {
     width: childrenRect.width
     height: childrenRect.height
 
-    property alias cfg_accountHome: accountHomeField.text
-    property alias cfg_displayCurrency: displayCurrencyField.text
+    property string cfg_accountHome: ""
+    property string cfg_displayCurrency: ""
 
     Kirigami.FormLayout {
         anchors.left: parent.left
@@ -27,7 +27,9 @@ Item {
             QQC2.TextField {
                 id: accountHomeField
                 Layout.fillWidth: true
-                placeholderText: "~/.claude"
+                placeholderText: i18n("Full path, for example /home/you/.claude")
+                text: page.cfg_accountHome
+                onTextChanged: page.cfg_accountHome = text
             }
 
             QQC2.Button {
@@ -40,12 +42,14 @@ Item {
             id: displayCurrencyField
             Kirigami.FormData.label: i18n("Display Currency:")
             placeholderText: i18n("Locale default (for example DKK)")
+            text: page.cfg_displayCurrency
+            onTextChanged: page.cfg_displayCurrency = text
         }
     }
 
     FolderDialog {
         id: folderDialog
         title: i18n("Choose Account Home")
-        onAccepted: accountHomeField.text = selectedFolder.toLocalFile()
+        onAccepted: page.cfg_accountHome = selectedFolder.toLocalFile()
     }
 }

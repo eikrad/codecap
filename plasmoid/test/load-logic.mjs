@@ -14,6 +14,7 @@ export function loadLogic() {
         ${source}
         return {
             emptySnapshot,
+            expandPath,
             normalizeSnapshot,
             parseSnapshot,
             showAllowanceBars,
