@@ -35,8 +35,7 @@ test:
 test-plasmoid:
 	node --test plasmoid/test/*.test.mjs
 
-ci: test
-	$(GO) vet ./...
+ci: test test-install
 
 test-install:
 	rm -rf .install-test
