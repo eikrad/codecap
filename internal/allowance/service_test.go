@@ -50,6 +50,98 @@ func TestServiceResolveReadyOnLiveFetch(t *testing.T) {
 	}
 }
 
+func TestServiceResolveSignedOutWhenRefreshRejected(t *testing.T) {
+	accountHome := t.TempDir()
+	writeCreds(t, accountHome, 1)
+
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/oauth/token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(tokenServer.Close)
+
+	svc := NewService(NewLastKnownStore(t.TempDir()))
+	svc.HTTPClient = tokenServer.Client()
+	svc.APIBaseURL = tokenServer.URL
+	svc.TokenBaseURL = tokenServer.URL
+	svc.Now = func() time.Time { return time.Unix(10, 0).UTC() }
+
+	got, err := svc.Resolve(accountHome)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got.Face != snapshot.FaceSignedOut {
+		t.Fatalf("face: got %q want signed_out", got.Face)
+	}
+	if got.UsageCredit != "none" {
+		t.Fatalf("usage credit: got %q want none", got.UsageCredit)
+	}
+}
+
+func TestServiceResolveSignedOutWhenUnauthorizedRefreshRejected(t *testing.T) {
+	accountHome := t.TempDir()
+	writeCreds(t, accountHome, time.Now().Add(time.Hour).UnixMilli())
+
+	usageCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/oauth/usage":
+			usageCalls++
+			w.WriteHeader(http.StatusUnauthorized)
+		case "/v1/oauth/token":
+			w.WriteHeader(http.StatusBadRequest)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	svc := NewService(NewLastKnownStore(t.TempDir()))
+	svc.HTTPClient = server.Client()
+	svc.APIBaseURL = server.URL
+	svc.TokenBaseURL = server.URL
+
+	got, err := svc.Resolve(accountHome)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if usageCalls == 0 {
+		t.Fatal("expected usage fetch before refresh attempt")
+	}
+	if got.Face != snapshot.FaceSignedOut {
+		t.Fatalf("face: got %q want signed_out", got.Face)
+	}
+}
+
+func TestServiceResolveUnknownAllowanceWhenFetchFailsWithoutLastKnownCache(t *testing.T) {
+	accountHome := t.TempDir()
+	writeCreds(t, accountHome, time.Now().Add(time.Hour).UnixMilli())
+
+	usageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(usageServer.Close)
+
+	svc := NewService(NewLastKnownStore(t.TempDir()))
+	svc.HTTPClient = usageServer.Client()
+	svc.APIBaseURL = usageServer.URL
+	svc.TokenBaseURL = usageServer.URL
+
+	got, err := svc.Resolve(accountHome)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got.Face != snapshot.FaceUnknownAllowance {
+		t.Fatalf("face: got %q want unknown_allowance", got.Face)
+	}
+	if got.UsageCredit != "none" {
+		t.Fatalf("usage credit: got %q want none", got.UsageCredit)
+	}
+}
+
 func TestServiceResolveUsesLastKnownWhenFetchFails(t *testing.T) {
 	accountHome := t.TempDir()
 	writeCreds(t, accountHome, time.Now().Add(time.Hour).UnixMilli())

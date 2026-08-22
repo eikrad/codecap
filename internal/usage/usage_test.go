@@ -126,6 +126,45 @@ func TestComputeWithRatesUsesCustomListPriceTable(t *testing.T) {
 	}
 }
 
+func TestComputeAtReturnsZeroWhenProjectsMissing(t *testing.T) {
+	accountHome := t.TempDir()
+	got, err := computeAt(accountHome, "UTC", 1, time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC), DefaultRates())
+	if err != nil {
+		t.Fatalf("compute usage: %v", err)
+	}
+	if got.Session.Tokens != 0 || got.Today.Tokens != 0 || got.Week.Tokens != 0 || got.Month.Tokens != 0 {
+		t.Fatalf("expected zero usage without projects/, got %+v", got)
+	}
+}
+
+func TestComputeAtWeekBoundaryExcludesPriorWeekEvents(t *testing.T) {
+	accountHome := t.TempDir()
+	logDir := filepath.Join(accountHome, "projects", "sample")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC) // Thursday
+	lines := []string{
+		`{"type":"assistant","uuid":"prior-week","timestamp":"2026-08-16T12:00:00Z","message":{"model":"claude-sonnet","usage":{"input_tokens":900,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}`,
+		`{"type":"assistant","uuid":"this-week","timestamp":"2026-08-18T12:00:00Z","message":{"model":"claude-sonnet","usage":{"input_tokens":100,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}`,
+	}
+	if err := os.WriteFile(filepath.Join(logDir, "events.jsonl"), []byte(joinLines(lines)), 0o600); err != nil {
+		t.Fatalf("write log file: %v", err)
+	}
+
+	got, err := computeAt(accountHome, "UTC", 1, now, DefaultRates())
+	if err != nil {
+		t.Fatalf("compute usage: %v", err)
+	}
+	if got.Week.Tokens != 100 {
+		t.Fatalf("week tokens: got %d want 100 (Monday-start week excludes Sunday Aug 16)", got.Week.Tokens)
+	}
+	if got.Month.Tokens != 1000 {
+		t.Fatalf("month tokens: got %d want 1000", got.Month.Tokens)
+	}
+}
+
 func TestComputeAtIgnoresInvalidLines(t *testing.T) {
 	accountHome := t.TempDir()
 	logDir := filepath.Join(accountHome, "projects", "sample")

@@ -80,6 +80,28 @@ func TestFromUsagePayloadMapsUsageCreditStates(t *testing.T) {
 	}
 }
 
+func TestFromUsagePayloadMapsNullBucketsToEmptyWindows(t *testing.T) {
+	payload := []byte(`{
+		"five_hour": null,
+		"seven_day": null,
+		"extra_usage": {"is_enabled": false}
+	}`)
+
+	got, err := FromUsagePayload(payload)
+	if err != nil {
+		t.Fatalf("map payload: %v", err)
+	}
+	if got.Session.UsedPercent != 0 || got.Session.ResetsAt != 0 {
+		t.Fatalf("session window: got %+v want empty", got.Session)
+	}
+	if got.Weekly.UsedPercent != 0 || got.Weekly.ResetsAt != 0 {
+		t.Fatalf("weekly window: got %+v want empty", got.Weekly)
+	}
+	if got.UsageCredit != "none" {
+		t.Fatalf("usage_credit: got %q want none", got.UsageCredit)
+	}
+}
+
 func TestFromUsagePayloadRejectsInvalidJSON(t *testing.T) {
 	if _, err := FromUsagePayload([]byte(`not-json`)); err == nil {
 		t.Fatal("expected error for invalid JSON")
