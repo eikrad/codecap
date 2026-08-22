@@ -18,6 +18,14 @@ Finding IDs (`C-2`, `P-C1`, …) refer to the audit.
 | **3 · Move the work** | **Done**, except byte-level incremental parsing — see below. |
 | 4–6 | Not started. |
 
+**Reordered after real-desktop testing.** See the addendum in
+[`audit-2026-08-22.md`](./audit-2026-08-22.md). Phase 5.2 (a QML test harness) cost
+twenty minutes, not the day it was budgeted, and it immediately found a bug in an
+already-committed fix. Phase 5.3 (a D-Bus stub under `dbus-run-session`) is what
+would have caught the two worst findings of the day and is now the highest-value
+remaining item, not the last one. Treat 5.2 and 5.3 as prerequisites for further
+plasmoid work rather than as follow-up.
+
 **What Phase 1 has not had.** None of the QML changes have been executed on a real
 Plasma 6 session — this work was done in a container with no Plasma, no Kirigami and
 no D-Bus session bus. What they have had:
