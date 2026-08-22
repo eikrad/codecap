@@ -6,12 +6,10 @@ The applet is QML-only and talks to a local session helper over D-Bus. The helpe
 
 ## Status
 
-This repository is currently implementing roadmap phase 3+:
+Roadmap phase 4 in progress on `feature/plasmoid-ui`:
 
-- helper skeleton (`GetSnapshot` / `Changed`)
-- Consumed Usage from Account Home logs
-- Session / Weekly Allowance via unofficial OAuth usage fetch + Last-Known cache
-- smoke plasmoid to verify D-Bus integration (visual rings/bars still phase 4)
+- helper: Consumed Usage + Session / Weekly Allowance over D-Bus
+- plasmoid: Session ring, tooltip, expanded bars + Consumed Usage form, Configure, FX in QML
 
 ## Run helper (development)
 
@@ -30,9 +28,10 @@ kpackagetool6 --type Plasma/Applet --install ./plasmoid
 
 Then add the `codecap` widget in Plasma:
 
-- empty Account Home → Unbound placeholder
-- helper stopped → Unknown Allowance
-- helper running with Account Home set → shows returned face JSON
+- empty Account Home → Unbound placeholder (folder icon)
+- helper stopped → Unknown Allowance (question icon)
+- signed in with helper running → Session ring and expanded Allowance bars
+- Configure: Account Home folder + Display Currency override
 
 ## License
 
