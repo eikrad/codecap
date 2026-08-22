@@ -209,3 +209,23 @@ test("formatMoney and formatTokens use locale formatting seam", () => {
         Number.prototype.toLocaleString = original;
     }
 });
+
+test("normalizeSnapshot carries the schema version and degraded reasons", () => {
+    const snap = Logic.normalizeSnapshot({
+        schema_version: 1,
+        face: "ready",
+        degraded: ["pending", "usage_unavailable"]
+    });
+    assert.equal(snap.schema_version, 1);
+    assert.deepEqual(snap.degraded, ["pending", "usage_unavailable"]);
+});
+
+test("normalizeDegraded tolerates anything the helper might send", () => {
+    // A separately installed helper of another version is the normal case, so
+    // the field may be absent, the wrong type, or partly junk.
+    assert.deepEqual(Logic.normalizeDegraded(undefined), []);
+    assert.deepEqual(Logic.normalizeDegraded(null), []);
+    assert.deepEqual(Logic.normalizeDegraded("pending"), []);
+    assert.deepEqual(Logic.normalizeDegraded([1, "", "pending", null, "x"]), ["pending", "x"]);
+    assert.deepEqual(Logic.normalizeSnapshot({ face: "ready" }).degraded, []);
+});

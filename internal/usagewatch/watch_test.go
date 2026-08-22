@@ -4,8 +4,10 @@
 package usagewatch
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -23,7 +25,7 @@ func TestEnsureNotifiesWhenProjectLogChanges(t *testing.T) {
 		case changed <- home:
 		default:
 		}
-	})
+	}, 20*time.Millisecond)
 	t.Cleanup(func() { _ = manager.Close() })
 
 	manager.Ensure(accountHome)
@@ -51,7 +53,7 @@ func TestEnsureNotifiesForADirectoryCreatedAfterTheWatchStarts(t *testing.T) {
 	}
 
 	changed := make(chan string, 16)
-	manager := NewManager(func(home string) { changed <- home })
+	manager := NewManager(func(home string) { changed <- home }, 20*time.Millisecond)
 	t.Cleanup(func() { _ = manager.Close() })
 	manager.Ensure(accountHome)
 
@@ -84,7 +86,7 @@ func waitForChange(t *testing.T, changed <-chan string) string {
 }
 
 func TestEnsureIsBoundedAndEvictsTheOldest(t *testing.T) {
-	manager := NewManager(func(string) {})
+	manager := NewManager(func(string) {}, 20*time.Millisecond)
 	t.Cleanup(func() { _ = manager.Close() })
 
 	homes := make([]string, 0, MaxWatchers+3)
@@ -122,7 +124,7 @@ func TestForgetStopsWatching(t *testing.T) {
 		t.Fatalf("mkdir projects: %v", err)
 	}
 
-	manager := NewManager(func(string) {})
+	manager := NewManager(func(string) {}, 20*time.Millisecond)
 	t.Cleanup(func() { _ = manager.Close() })
 	manager.Ensure(accountHome)
 	manager.Forget(accountHome)
@@ -140,7 +142,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(accountHome, "projects"), 0o755); err != nil {
 		t.Fatalf("mkdir projects: %v", err)
 	}
-	manager := NewManager(func(string) {})
+	manager := NewManager(func(string) {}, 20*time.Millisecond)
 	manager.Ensure(accountHome)
 
 	if err := manager.Close(); err != nil {
@@ -162,5 +164,45 @@ func TestIsUnderDirRejectsEscapes(t *testing.T) {
 		if got := isUnderDir(path, "/a"); got != want {
 			t.Fatalf("isUnderDir(%q, \"/a\") = %v, want %v", path, got, want)
 		}
+	}
+}
+
+func TestNotificationsAreCoalesced(t *testing.T) {
+	accountHome := t.TempDir()
+	logDir := filepath.Join(accountHome, "projects", "demo")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir projects: %v", err)
+	}
+
+	var mu sync.Mutex
+	var calls int
+	manager := NewManager(func(string) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+	}, 150*time.Millisecond)
+	t.Cleanup(func() { _ = manager.Close() })
+	manager.Ensure(accountHome)
+
+	// Claude Code appends to a log many times a second. One notification per
+	// event made the plasmoid re-read the whole corpus each time.
+	logPath := filepath.Join(logDir, "events.jsonl")
+	for i := 0; i < 40; i++ {
+		if err := os.WriteFile(logPath, []byte(fmt.Sprintf("{\"n\":%d}\n", i)), 0o600); err != nil {
+			t.Fatalf("write log: %v", err)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	time.Sleep(400 * time.Millisecond)
+
+	mu.Lock()
+	got := calls
+	mu.Unlock()
+
+	if got == 0 {
+		t.Fatal("expected at least one notification")
+	}
+	if got > 3 {
+		t.Fatalf("40 writes produced %d notifications, expected them to coalesce", got)
 	}
 }

@@ -15,7 +15,8 @@ Finding IDs (`C-2`, `P-C1`, …) refer to the audit.
 | **0 · Gates** | **Done.** `make lint` and `make ci` are green locally; CI runs three parallel jobs. |
 | **1 · Make it work** | **Code done, not yet run on a Plasma 6 desktop.** See the caveat below. |
 | **2 · Stop the bleeding** | **Done.** One deviation from 2.1, recorded below. |
-| 3–6 | Not started. |
+| **3 · Move the work** | **Done**, except byte-level incremental parsing — see below. |
+| 4–6 | Not started. |
 
 **What Phase 1 has not had.** None of the QML changes have been executed on a real
 Plasma 6 session — this work was done in a container with no Plasma, no Kirigami and
@@ -45,6 +46,24 @@ refreshing, and `EnsureAccessToken` has a lock-free fast path for the common cas
 where the token is still valid, so concurrent `GetSnapshot` calls never touch the
 lock at all. If the grant ever stops being rotated on refresh, moving the call out
 becomes the better trade.
+
+**Phase 3, measured.** Same corpus for all three (40 logs, 60k events, ~155 MB):
+
+```
+cold   (every log re-read, the old behaviour)   452 ms   134 MB   901,784 allocs
+warm   (nothing changed)                       15.8 ms   6.8 MB       1,062 allocs
+active (one log appended to)                   27.8 ms   9.9 MB      23,608 allocs
+```
+
+`GetSnapshot` itself no longer does any of this: it reads the cache and returns,
+and a test fails if it takes longer than 500 ms while the vendor hangs.
+
+**3.5 is partial.** Caching is per *file*, keyed on size and modification time, not
+per byte offset. During an active session exactly one log is being appended to, so a
+refresh re-reads one file instead of forty — the numbers above. Byte-level offsets
+would cut the 27.8 ms case further but need care around truncation and rotation, and
+the current figure is already far below anything a user can perceive. Left as a
+follow-up rather than done badly.
 
 **Coverage after phase 2** — `accounthome` 100 %, `usage` 80.5 %, `allowance` 77.8 %,
 `dbusapi` 72.3 %, `usagewatch` 66.7 %, `creds` 62.2 %. The poller went from 0 % to

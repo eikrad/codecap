@@ -216,6 +216,20 @@ PlasmoidItem {
         return Logic.formatMoney(usd, fxRate, displayCurrency, fxUsingUsdFallback, Qt.locale())
     }
 
+    // The helper says why a snapshot is incomplete; the wording is ours.
+    // allowance_unavailable is deliberately not listed: the Unknown Allowance
+    // placeholder already says that, and two notices for one fact is noise.
+    function degradedNote() {
+        const reasons = snapshot.degraded || []
+        if (reasons.indexOf("usage_unavailable") >= 0) {
+            return i18n("Consumed Usage could not be read from the local logs.")
+        }
+        if (reasons.indexOf("pending") >= 0) {
+            return i18n("Updating…")
+        }
+        return ""
+    }
+
     function usageCreditLabel() {
         switch (snapshot.usage_credit) {
         case "enabled":
@@ -357,6 +371,14 @@ PlasmoidItem {
                 visible: root.isBound && root.snapshot.account_label !== ""
                 text: root.snapshot.account_label
                 font.bold: true
+            }
+
+            PlasmaComponents.Label {
+                Layout.fillWidth: true
+                visible: root.degradedNote() !== ""
+                opacity: 0.75
+                wrapMode: Text.Wrap
+                text: root.degradedNote()
             }
 
             PlasmaComponents.Label {

@@ -18,6 +18,7 @@ export function loadLogic() {
             stripFileScheme,
             finiteNumber,
             normalizeWindow,
+            normalizeDegraded,
             normalizePeriod,
             normalizeSnapshot,
             parseSnapshot,

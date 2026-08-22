@@ -12,8 +12,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +23,40 @@ import (
 	"github.com/eikrad/codecap/internal/snapshot"
 	"github.com/godbus/dbus/v5/introspect"
 )
+
+// snapshotAfterRefresh drives the shape ADR 0011 implies: the first call is
+// served from an empty cache and kicks a background refresh, the second reads
+// what that refresh stored. GetSnapshot itself never blocks on the network or
+// on the filesystem.
+func snapshotAfterRefresh(t *testing.T, server *Server, accountHome string) snapshot.Snapshot {
+	t.Helper()
+
+	first, derr := server.GetSnapshot(accountHome, "UTC", 1)
+	if derr != nil {
+		t.Fatalf("GetSnapshot (cold): %v", derr)
+	}
+	var cold snapshot.Snapshot
+	if err := json.Unmarshal([]byte(first), &cold); err != nil {
+		t.Fatalf("unmarshal cold snapshot: %v", err)
+	}
+	if len(cold.Degraded) == 0 {
+		t.Fatal("a cold call should say the snapshot is not complete yet")
+	}
+
+	// scheduleRefresh registers with the WaitGroup before GetSnapshot returns,
+	// so this cannot race.
+	server.refreshes.Wait()
+
+	second, derr := server.GetSnapshot(accountHome, "UTC", 1)
+	if derr != nil {
+		t.Fatalf("GetSnapshot (warm): %v", derr)
+	}
+	var warm snapshot.Snapshot
+	if err := json.Unmarshal([]byte(second), &warm); err != nil {
+		t.Fatalf("unmarshal warm snapshot: %v", err)
+	}
+	return warm
+}
 
 func TestGetSnapshotFillsConsumedUsageForSignedInAccountHome(t *testing.T) {
 	accountHome := t.TempDir()
@@ -41,15 +77,8 @@ func TestGetSnapshotFillsConsumedUsageForSignedInAccountHome(t *testing.T) {
 
 	server := NewServer(context.Background(), nil, nil)
 	defer func() { _ = server.Close() }()
-	payload, derr := server.GetSnapshot(accountHome, "UTC", 1)
-	if derr != nil {
-		t.Fatalf("GetSnapshot failed: %v", derr)
-	}
+	snap := snapshotAfterRefresh(t, server, accountHome)
 
-	var snap snapshot.Snapshot
-	if err := json.Unmarshal([]byte(payload), &snap); err != nil {
-		t.Fatalf("unmarshal snapshot: %v", err)
-	}
 	if snap.Face != snapshot.FaceUnknownAllowance {
 		t.Fatalf("expected face %q, got %q", snapshot.FaceUnknownAllowance, snap.Face)
 	}
@@ -89,15 +118,8 @@ func TestGetSnapshotFillsAllowanceWhenVendorFetchSucceeds(t *testing.T) {
 
 	server := NewServer(context.Background(), nil, svc)
 	defer func() { _ = server.Close() }()
-	payload, derr := server.GetSnapshot(accountHome, "UTC", 1)
-	if derr != nil {
-		t.Fatalf("GetSnapshot failed: %v", derr)
-	}
+	snap := snapshotAfterRefresh(t, server, accountHome)
 
-	var snap snapshot.Snapshot
-	if err := json.Unmarshal([]byte(payload), &snap); err != nil {
-		t.Fatalf("unmarshal snapshot: %v", err)
-	}
 	if snap.Face != snapshot.FaceReady {
 		t.Fatalf("expected ready, got %q", snap.Face)
 	}
@@ -136,15 +158,8 @@ func TestGetSnapshotSignedOutWhenRefreshRejected(t *testing.T) {
 
 	server := NewServer(context.Background(), nil, svc)
 	defer func() { _ = server.Close() }()
-	payload, derr := server.GetSnapshot(accountHome, "UTC", 1)
-	if derr != nil {
-		t.Fatalf("GetSnapshot failed: %v", derr)
-	}
+	snap := snapshotAfterRefresh(t, server, accountHome)
 
-	var snap snapshot.Snapshot
-	if err := json.Unmarshal([]byte(payload), &snap); err != nil {
-		t.Fatalf("unmarshal snapshot: %v", err)
-	}
 	if snap.Face != snapshot.FaceSignedOut {
 		t.Fatalf("expected signed_out, got %q", snap.Face)
 	}
@@ -186,15 +201,8 @@ func TestGetSnapshotReadyIncludesAllowanceAndConsumedUsage(t *testing.T) {
 
 	server := NewServer(context.Background(), nil, svc)
 	defer func() { _ = server.Close() }()
-	payload, derr := server.GetSnapshot(accountHome, "UTC", 1)
-	if derr != nil {
-		t.Fatalf("GetSnapshot failed: %v", derr)
-	}
+	snap := snapshotAfterRefresh(t, server, accountHome)
 
-	var snap snapshot.Snapshot
-	if err := json.Unmarshal([]byte(payload), &snap); err != nil {
-		t.Fatalf("unmarshal snapshot: %v", err)
-	}
 	if snap.Face != snapshot.FaceReady {
 		t.Fatalf("expected ready, got %q", snap.Face)
 	}
@@ -363,4 +371,126 @@ func TestGetSnapshotIsSafeUnderConcurrentCalls(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestGetSnapshotDoesNotBlockOnASlowVendor(t *testing.T) {
+	accountHome := t.TempDir()
+	creds := fmt.Sprintf(`{"claudeAiOauth":{"accessToken":"sk-ant-oat01-test","refreshToken":"refresh","expiresAt":%d}}`,
+		time.Now().Add(time.Hour).UnixMilli())
+	if err := os.WriteFile(filepath.Join(accountHome, ".credentials.json"), []byte(creds), 0o600); err != nil {
+		t.Fatalf("create credentials: %v", err)
+	}
+
+	release := make(chan struct{})
+	vendor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"five_hour":{"utilization":10,"resets_at":"2026-08-20T12:00:00Z"}}`))
+	}))
+	t.Cleanup(func() {
+		close(release)
+		vendor.Close()
+	})
+
+	svc := allowance.NewService(allowance.NewLastKnownStore(t.TempDir()))
+	svc.HTTPClient = vendor.Client()
+	svc.APIBaseURL = vendor.URL
+	svc.TokenBaseURL = vendor.URL
+
+	server := NewServer(context.Background(), nil, svc)
+	t.Cleanup(func() { _ = server.Close() })
+
+	// ADR 0011 puts polling in the helper. Doing the fetch inline meant a slow
+	// or hung vendor froze the widget and could outlast the D-Bus timeout.
+	start := time.Now()
+	payload, derr := server.GetSnapshot(accountHome, "UTC", 1)
+	elapsed := time.Since(start)
+	if derr != nil {
+		t.Fatalf("GetSnapshot: %v", derr)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("GetSnapshot took %v while the vendor was hanging", elapsed)
+	}
+
+	var snap snapshot.Snapshot
+	if err := json.Unmarshal([]byte(payload), &snap); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if snap.SchemaVersion != snapshot.SchemaVersion {
+		t.Fatalf("schema_version is %d, want %d", snap.SchemaVersion, snapshot.SchemaVersion)
+	}
+	if !slices.Contains(snap.Degraded, snapshot.DegradedPending) {
+		t.Fatalf("a cold snapshot should be marked pending, got %v", snap.Degraded)
+	}
+}
+
+func TestGetSnapshotServesTheCacheOnceRefreshed(t *testing.T) {
+	accountHome := t.TempDir()
+	creds := fmt.Sprintf(`{"claudeAiOauth":{"accessToken":"sk-ant-oat01-test","refreshToken":"refresh","expiresAt":%d}}`,
+		time.Now().Add(time.Hour).UnixMilli())
+	if err := os.WriteFile(filepath.Join(accountHome, ".credentials.json"), []byte(creds), 0o600); err != nil {
+		t.Fatalf("create credentials: %v", err)
+	}
+
+	var fetches int32
+	vendor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&fetches, 1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"five_hour":{"utilization":42,"resets_at":"2026-08-20T12:00:00Z"}}`))
+	}))
+	t.Cleanup(vendor.Close)
+
+	svc := allowance.NewService(allowance.NewLastKnownStore(t.TempDir()))
+	svc.HTTPClient = vendor.Client()
+	svc.APIBaseURL = vendor.URL
+	svc.TokenBaseURL = vendor.URL
+
+	server := NewServer(context.Background(), nil, svc)
+	t.Cleanup(func() { _ = server.Close() })
+
+	snap := snapshotAfterRefresh(t, server, accountHome)
+	if snap.SessionAllowance.UsedPercent != 42 {
+		t.Fatalf("session allowance: got %v want 42", snap.SessionAllowance.UsedPercent)
+	}
+	if len(snap.Degraded) != 0 {
+		t.Fatalf("a refreshed snapshot should not be degraded, got %v", snap.Degraded)
+	}
+
+	after := atomic.LoadInt32(&fetches)
+	// Ten more calls inside the TTL must not touch the vendor at all.
+	for i := 0; i < 10; i++ {
+		if _, derr := server.GetSnapshot(accountHome, "UTC", 1); derr != nil {
+			t.Fatalf("GetSnapshot: %v", derr)
+		}
+	}
+	server.refreshes.Wait()
+	if got := atomic.LoadInt32(&fetches); got != after {
+		t.Fatalf("cached calls triggered %d extra vendor fetches", got-after)
+	}
+}
+
+func TestFillFromCacheReaggregatesWhenTheWeekStartChanges(t *testing.T) {
+	accountHome := t.TempDir()
+	server := NewServer(context.Background(), nil, nil)
+	t.Cleanup(func() { _ = server.Close() })
+
+	state := server.state(accountHome)
+	state.mu.Lock()
+	state.key = usageKey{timezone: "UTC", weekStart: 1}
+	state.consumed = snapshot.ConsumedUsage{Week: snapshot.ConsumedPeriod{Tokens: 500}}
+	state.consumedOK = true
+	state.consumedAt = time.Now()
+	state.mu.Unlock()
+
+	snap := snapshot.Snapshot{Face: snapshot.FaceReady, AccountHome: accountHome}
+	// A different week start is a different aggregation, so the cached value
+	// must not be served for it.
+	server.fillFromCache(&snap, usageKey{timezone: "UTC", weekStart: 0})
+
+	if snap.ConsumedUsage.Week.Tokens != 0 {
+		t.Fatalf("cached usage was reused for a different week start: %+v", snap.ConsumedUsage)
+	}
+	if !slices.Contains(snap.Degraded, snapshot.DegradedPending) {
+		t.Fatalf("expected the snapshot to be marked incomplete, got %v", snap.Degraded)
+	}
 }

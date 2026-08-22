@@ -43,7 +43,32 @@ type period struct {
 	end   time.Time
 }
 
+// periods are the four reported windows. Session is a rolling five hours in
+// absolute time; the others are wall-clock boundaries in the desktop's zone.
+type periods struct {
+	session period
+	today   period
+	week    period
+	month   period
+}
+
+func periodsAt(now time.Time, loc *time.Location, weekStart int32) periods {
+	nowInLoc := now.In(loc)
+	return periods{
+		session: period{start: now.Add(-sessionWindow), end: now},
+		today:   period{start: dayStart(nowInLoc), end: nowInLoc},
+		week:    period{start: weekStartAt(nowInLoc, normalizeWeekStart(weekStart)), end: nowInLoc},
+		month: period{
+			start: time.Date(nowInLoc.Year(), nowInLoc.Month(), 1, 0, 0, 0, 0, loc),
+			end:   nowInLoc,
+		},
+	}
+}
+
 // Compute aggregates Consumed Usage for an Account Home using DefaultRates.
+//
+// This builds a throwaway Cache, so it re-reads every log. Long-lived callers
+// should hold a Cache and call its Compute instead.
 func Compute(accountHome, timezone string, weekStart int32) (snapshot.ConsumedUsage, error) {
 	return ComputeWithRates(accountHome, timezone, weekStart, DefaultRates())
 }
@@ -51,6 +76,10 @@ func Compute(accountHome, timezone string, weekStart int32) (snapshot.ConsumedUs
 // ComputeWithRates is the List Price seam: callers can swap the published rate table.
 func ComputeWithRates(accountHome, timezone string, weekStart int32, rates Rates) (snapshot.ConsumedUsage, error) {
 	return computeAt(accountHome, timezone, weekStart, time.Now().UTC(), rates)
+}
+
+func computeAt(accountHome, timezone string, weekStart int32, now time.Time, rates Rates) (snapshot.ConsumedUsage, error) {
+	return NewCache(rates).computeAt(accountHome, timezone, weekStart, now)
 }
 
 // resolveLocation maps the bus timezone argument to a location.
@@ -70,44 +99,6 @@ func resolveLocation(timezone string) (*time.Location, error) {
 		return nil, fmt.Errorf("resolve timezone %q: %w", trimmed, err)
 	}
 	return loc, nil
-}
-
-func computeAt(accountHome, timezone string, weekStart int32, now time.Time, rates Rates) (snapshot.ConsumedUsage, error) {
-	loc, err := resolveLocation(timezone)
-	if err != nil {
-		return snapshot.ConsumedUsage{}, err
-	}
-
-	normalizedWeekStart := normalizeWeekStart(weekStart)
-	nowInLoc := now.In(loc)
-
-	session := period{start: now.Add(-sessionWindow), end: now}
-	today := period{start: dayStart(nowInLoc), end: nowInLoc}
-	week := period{start: weekStartAt(nowInLoc, normalizedWeekStart), end: nowInLoc}
-	month := period{
-		start: time.Date(nowInLoc.Year(), nowInLoc.Month(), 1, 0, 0, 0, 0, loc),
-		end:   nowInLoc,
-	}
-
-	files, err := listJSONLFiles(accountHome)
-	if err != nil {
-		return snapshot.ConsumedUsage{}, err
-	}
-
-	seen := make(map[string]struct{})
-	var usage snapshot.ConsumedUsage
-	for _, jsonlPath := range files {
-		fileUsage, fileErr := consumeFile(jsonlPath, session, today, week, month, loc, rates, seen)
-		if fileErr != nil {
-			continue
-		}
-		addPeriod(&usage.Session, fileUsage.Session)
-		addPeriod(&usage.Today, fileUsage.Today)
-		addPeriod(&usage.Week, fileUsage.Week)
-		addPeriod(&usage.Month, fileUsage.Month)
-	}
-
-	return usage, nil
 }
 
 func listJSONLFiles(accountHome string) ([]string, error) {
@@ -146,86 +137,69 @@ func listJSONLFiles(accountHome string) ([]string, error) {
 	return files, err
 }
 
-func consumeFile(path string, session, today, week, month period, loc *time.Location, rates Rates, seen map[string]struct{}) (snapshot.ConsumedUsage, error) {
+// parseEvents reads one log file into retained events.
+func parseEvents(path string, rates Rates, cutoff time.Time) ([]event, error) {
 	// O_NOFOLLOW because the walk saw an lstat, not the target; O_NONBLOCK so
 	// that opening anything that is not a plain file cannot block. Both are
 	// belt and braces over the IsRegular check in listJSONLFiles, since the
 	// tree can change between the walk and the open.
 	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
-		return snapshot.ConsumedUsage{}, err
+		return nil, err
 	}
 	defer func() { _ = file.Close() }()
 
 	info, err := file.Stat()
 	if err != nil {
-		return snapshot.ConsumedUsage{}, err
+		return nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return snapshot.ConsumedUsage{}, fmt.Errorf("%s is not a regular file", path)
+		return nil, fmt.Errorf("%s is not a regular file", path)
 	}
 
-	return consumeReader(file, session, today, week, month, loc, rates, seen)
+	return parseEventsFrom(file, rates, cutoff)
 }
 
-func consumeReader(reader io.Reader, session, today, week, month period, loc *time.Location, rates Rates, seen map[string]struct{}) (snapshot.ConsumedUsage, error) {
+func parseEventsFrom(reader io.Reader, rates Rates, cutoff time.Time) ([]event, error) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 
-	var usage snapshot.ConsumedUsage
+	var events []event
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
-		var event usageEvent
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
+		var decoded usageEvent
+		if err := json.Unmarshal([]byte(line), &decoded); err != nil {
 			continue
 		}
-		if event.Type != "assistant" {
+		if decoded.Type != "assistant" {
 			continue
 		}
-		if event.UUID != "" {
-			if _, ok := seen[event.UUID]; ok {
-				continue
-			}
-			seen[event.UUID] = struct{}{}
-		}
-
-		eventTime, err := time.Parse(time.RFC3339Nano, event.Timestamp)
+		at, err := time.Parse(time.RFC3339Nano, decoded.Timestamp)
 		if err != nil {
 			continue
 		}
-
-		eventInLoc := eventTime.In(loc)
-		tokens := event.Message.Usage.InputTokens +
-			event.Message.Usage.OutputTokens +
-			event.Message.Usage.CacheCreationInputTokens +
-			event.Message.Usage.CacheReadInputTokens
-		listPriceUSD := estimateListPriceUSD(rates, event.Message.Model, event.Message.Usage)
-		periodUsage := snapshot.ConsumedPeriod{
-			ListPriceUSD: listPriceUSD,
-			Tokens:       tokens,
+		// Nothing older than the longest reported window can ever be counted.
+		if at.Before(cutoff) {
+			continue
 		}
 
-		if inPeriod(eventTime, session) {
-			addPeriod(&usage.Session, periodUsage)
-		}
-		if inPeriod(eventInLoc, today) {
-			addPeriod(&usage.Today, periodUsage)
-		}
-		if inPeriod(eventInLoc, week) {
-			addPeriod(&usage.Week, periodUsage)
-		}
-		if inPeriod(eventInLoc, month) {
-			addPeriod(&usage.Month, periodUsage)
-		}
+		usageCounts := decoded.Message.Usage
+		events = append(events, event{
+			at:   at,
+			uuid: decoded.UUID,
+			tokens: usageCounts.InputTokens + usageCounts.OutputTokens +
+				usageCounts.CacheCreationInputTokens + usageCounts.CacheReadInputTokens,
+			priceUSD: estimateListPriceUSD(rates, decoded.Message.Model, usageCounts),
+		})
 	}
 
 	if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
-		return snapshot.ConsumedUsage{}, err
+		return nil, err
 	}
-	return usage, nil
+	return events, nil
 }
 
 func estimateListPriceUSD(rates Rates, model string, usage tokenUsage) float64 {

@@ -23,10 +23,19 @@ import (
 // D-Bus arguments, so the registry has to be bounded.
 const MaxWatchers = 8
 
+// DefaultDebounce coalesces a burst of filesystem events into one notification.
+//
+// Claude Code appends to a log many times a second. Every event used to emit a
+// Changed signal, each of which made the plasmoid call GetSnapshot, which
+// re-read the entire log corpus — the watcher fed the exact work it was meant
+// to avoid.
+const DefaultDebounce = time.Second
+
 type Manager struct {
 	mu       sync.Mutex
 	watchers map[string]*watchInstance
 	onChange func(accountHome string)
+	debounce time.Duration
 	now      func() time.Time
 }
 
@@ -34,13 +43,51 @@ type watchInstance struct {
 	watcher  *fsnotify.Watcher
 	done     chan struct{}
 	lastSeen time.Time
+
+	timerMu sync.Mutex
+	timer   *time.Timer
 }
 
-func NewManager(onChange func(accountHome string)) *Manager {
+func NewManager(onChange func(accountHome string), debounce time.Duration) *Manager {
+	if debounce <= 0 {
+		debounce = DefaultDebounce
+	}
 	return &Manager{
 		watchers: make(map[string]*watchInstance),
 		onChange: onChange,
+		debounce: debounce,
 		now:      func() time.Time { return time.Now() },
+	}
+}
+
+// notify schedules one notification per debounce window. The first event in a
+// burst arms the timer; the rest are dropped.
+func (m *Manager) notify(accountHome string, instance *watchInstance) {
+	instance.timerMu.Lock()
+	defer instance.timerMu.Unlock()
+	if instance.timer != nil {
+		return
+	}
+	instance.timer = time.AfterFunc(m.debounce, func() {
+		instance.timerMu.Lock()
+		instance.timer = nil
+		instance.timerMu.Unlock()
+
+		select {
+		case <-instance.done:
+			return
+		default:
+		}
+		m.onChange(accountHome)
+	})
+}
+
+func (instance *watchInstance) stopTimer() {
+	instance.timerMu.Lock()
+	defer instance.timerMu.Unlock()
+	if instance.timer != nil {
+		instance.timer.Stop()
+		instance.timer = nil
 	}
 }
 
@@ -121,6 +168,7 @@ func (m *Manager) closeInstanceLocked(accountHome string) {
 		return
 	}
 	close(instance.done)
+	instance.stopTimer()
 	_ = instance.watcher.Close()
 	delete(m.watchers, accountHome)
 }
@@ -139,6 +187,7 @@ func (m *Manager) Close() error {
 	var errs []error
 	for accountHome, instance := range m.watchers {
 		close(instance.done)
+		instance.stopTimer()
 		if err := instance.watcher.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("close watcher for %s: %w", accountHome, err))
 		}
@@ -169,7 +218,7 @@ func (m *Manager) loop(accountHome, projectsDir string, instance *watchInstance)
 			}
 
 			if isUnderDir(event.Name, projectsDir) {
-				m.onChange(accountHome)
+				m.notify(accountHome, instance)
 			}
 		case err, ok := <-instance.watcher.Errors:
 			if !ok {

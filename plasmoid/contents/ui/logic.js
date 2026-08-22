@@ -36,6 +36,8 @@ function expandPath(path, homeDir) {
 
 function emptySnapshot() {
     return {
+        schema_version: 0,
+        degraded: [],
         face: "unbound",
         account_home: "",
         account_label: "",
@@ -78,6 +80,22 @@ function normalizePeriod(value) {
     }
 }
 
+// The helper reports why a snapshot is incomplete as stable codes, never as
+// message text: the wording belongs here, and an error string could carry a
+// filesystem path across the bus.
+function normalizeDegraded(value) {
+    if (!Array.isArray(value)) {
+        return []
+    }
+    var reasons = []
+    for (var i = 0; i < value.length; i++) {
+        if (typeof value[i] === "string" && value[i] !== "") {
+            reasons.push(value[i])
+        }
+    }
+    return reasons
+}
+
 // Helper and plasmoid are installed separately and versioned separately, so a
 // payload may be partial or carry unexpected types. Every field is filled in
 // and coerced; nothing downstream should ever see undefined or NaN.
@@ -94,6 +112,8 @@ function normalizeSnapshot(decoded) {
     base.usage_credit = typeof decoded.usage_credit === "string" && decoded.usage_credit !== ""
         ? decoded.usage_credit : "none"
     base.fetched_at = finiteNumber(decoded.fetched_at)
+    base.schema_version = finiteNumber(decoded.schema_version)
+    base.degraded = normalizeDegraded(decoded.degraded)
     base.session_allowance = normalizeWindow(decoded.session_allowance)
     base.weekly_allowance = normalizeWindow(decoded.weekly_allowance)
 

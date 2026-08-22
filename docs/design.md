@@ -50,8 +50,15 @@ Empty Account Home: the plasmoid does not call the helper (Unbound is local).
 
 Snapshot JSON:
 
+`schema_version` is the shape of this object; `degraded` says why a snapshot is
+incomplete, as stable codes rather than message text (the plasmoid owns the wording,
+and an error string could carry a filesystem path onto the bus). `GetSnapshot` serves
+what is cached and returns; refreshes run in the helper and announce themselves with
+`Changed`, per ADR 0011.
+
 ```json
 {
+  "schema_version": 1,
   "face": "unbound | signed_out | unknown_allowance | ready",
   "account_home": "",
   "account_label": "",
@@ -64,7 +71,8 @@ Snapshot JSON:
     "week": { "list_price_usd": 0, "tokens": 0 },
     "month": { "list_price_usd": 0, "tokens": 0 }
   },
-  "fetched_at": 0
+  "fetched_at": 0,
+  "degraded": ["pending | usage_unavailable | allowance_unavailable"]
 }
 ```
 
