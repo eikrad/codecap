@@ -4,6 +4,7 @@
 package allowance
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -35,7 +36,7 @@ func TestFetchUsageReturnsMappedResult(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := NewClient(server.Client(), server.URL)
-	got, err := client.FetchUsage("sk-ant-oat01-test")
+	got, err := client.FetchUsage(context.Background(), "sk-ant-oat01-test")
 	if err != nil {
 		t.Fatalf("fetch usage: %v", err)
 	}
@@ -57,7 +58,7 @@ func TestFetchUsageUnauthorized(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := NewClient(server.Client(), server.URL)
-	_, err := client.FetchUsage("bad")
+	_, err := client.FetchUsage(context.Background(), "bad")
 	if err == nil {
 		t.Fatal("expected unauthorized error")
 	}

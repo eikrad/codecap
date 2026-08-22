@@ -11,7 +11,9 @@ A Plasma 6 QML applet plus a Go session helper. Product name **codecap**. Domain
 
 ## Licence
 
+<!-- REUSE-IgnoreStart -->
 **GPL-2.0-or-later** (GNU GPL v2 or later) for plasmoid and helper. Stated with SPDX/REUSE headers (`SPDX-License-Identifier: GPL-2.0-or-later`) and `LICENSES/GPL-2.0-or-later.txt`, which is KDE’s current format — not a different licence from “GNU2+”. AUR `license=('GPL-2.0-or-later')` uses the same identifier.
+<!-- REUSE-IgnoreEnd -->
 
 ## Two artifacts
 
@@ -48,8 +50,15 @@ Empty Account Home: the plasmoid does not call the helper (Unbound is local).
 
 Snapshot JSON:
 
+`schema_version` is the shape of this object; `degraded` says why a snapshot is
+incomplete, as stable codes rather than message text (the plasmoid owns the wording,
+and an error string could carry a filesystem path onto the bus). `GetSnapshot` serves
+what is cached and returns; refreshes run in the helper and announce themselves with
+`Changed`, per ADR 0011.
+
 ```json
 {
+  "schema_version": 1,
   "face": "unbound | signed_out | unknown_allowance | ready",
   "account_home": "",
   "account_label": "",
@@ -62,7 +71,8 @@ Snapshot JSON:
     "week": { "list_price_usd": 0, "tokens": 0 },
     "month": { "list_price_usd": 0, "tokens": 0 }
   },
-  "fetched_at": 0
+  "fetched_at": 0,
+  "degraded": ["pending | usage_unavailable | allowance_unavailable"]
 }
 ```
 

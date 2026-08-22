@@ -6,6 +6,10 @@ Each phase should be runnable on this machine before the next starts. Phase 4 ma
 
 Phases 0–5 are implemented on `main`. Optional follow-ups: AUR publish, Get New Widgets packaging.
 
+A full-tree audit on 2026-08-22 found that several of those phases are implemented but not
+working. Findings: [`audit-2026-08-22.md`](./audit-2026-08-22.md). Order of work to close them:
+[`plan-hardening.md`](./plan-hardening.md).
+
 ## v1
 
 0. **Repo hygiene** — rename `Claude-counter` → `codecap`; licence **GPL-2.0-or-later** (SPDX/REUSE headers + `LICENSES/`); `git init`; GitHub repo **`eikrad/codecap`** (public — AUR and Get New Widgets need a public source tarball). English UI with `i18n()` wrappers.

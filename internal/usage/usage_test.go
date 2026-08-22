@@ -6,8 +6,11 @@ package usage
 import (
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/eikrad/codecap/internal/snapshot"
 )
 
 func TestComputeAtAggregatesPeriodsByTimezoneAndWeekStart(t *testing.T) {
@@ -197,4 +200,179 @@ func joinLines(lines []string) string {
 		out += line + "\n"
 	}
 	return out
+}
+
+func TestResolveLocationEmptyMeansHelperLocalZone(t *testing.T) {
+	loc, err := resolveLocation("")
+	if err != nil {
+		t.Fatalf("resolve empty timezone: %v", err)
+	}
+	if loc != time.Local {
+		t.Fatalf("expected time.Local for the empty timezone, got %v", loc)
+	}
+
+	loc, err = resolveLocation("  ")
+	if err != nil {
+		t.Fatalf("resolve blank timezone: %v", err)
+	}
+	if loc != time.Local {
+		t.Fatalf("expected time.Local for a blank timezone, got %v", loc)
+	}
+}
+
+func TestResolveLocationAcceptsIANAIDsAndRejectsDisplayNames(t *testing.T) {
+	if _, err := resolveLocation("Europe/Copenhagen"); err != nil {
+		t.Fatalf("resolve IANA id: %v", err)
+	}
+
+	// These are what Date.prototype.toString() produces. Treating them as a
+	// silent UTC fallback moved every day, week and month boundary for users
+	// outside UTC.
+	for _, name := range []string{
+		"Central European Summer Time",
+		"CEST",
+		"Coordinated Universal Time",
+		"not a zone",
+	} {
+		if _, err := resolveLocation(name); err == nil {
+			t.Fatalf("expected %q to be rejected, got no error", name)
+		}
+	}
+}
+
+func TestComputeAtRejectsUnresolvableTimezone(t *testing.T) {
+	accountHome := t.TempDir()
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+
+	if _, err := computeAt(accountHome, "Central European Summer Time", 1, now, DefaultRates()); err == nil {
+		t.Fatal("expected an unresolvable timezone to be reported, got no error")
+	}
+}
+
+func TestComputeAtEmptyTimezoneMatchesTheHelperLocalZone(t *testing.T) {
+	accountHome := t.TempDir()
+	logDir := filepath.Join(accountHome, "projects", "sample")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	line := `{"type":"assistant","uuid":"tz1","timestamp":"2026-08-19T23:30:00Z","message":{"model":"claude-sonnet","usage":{"input_tokens":1000,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}`
+	if err := os.WriteFile(filepath.Join(logDir, "events.jsonl"), []byte(line+"\n"), 0o600); err != nil {
+		t.Fatalf("write log file: %v", err)
+	}
+
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+
+	// time.Local is fixed at process start, so this asserts the equivalence
+	// rather than a particular zone: an empty argument must behave exactly like
+	// naming the zone the helper is running in.
+	explicit, err := computeAt(accountHome, time.Local.String(), 1, now, DefaultRates())
+	if err != nil {
+		t.Fatalf("compute with explicit local zone: %v", err)
+	}
+	implicit, err := computeAt(accountHome, "", 1, now, DefaultRates())
+	if err != nil {
+		t.Fatalf("compute with empty zone: %v", err)
+	}
+	if implicit != explicit {
+		t.Fatalf("empty timezone should equal %q: got %+v want %+v",
+			time.Local.String(), implicit, explicit)
+	}
+}
+
+func TestComputeAtDayBoundaryFollowsTheGivenZone(t *testing.T) {
+	accountHome := t.TempDir()
+	logDir := filepath.Join(accountHome, "projects", "sample")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	// 23:30 UTC on the 19th is 01:30 on the 20th in Copenhagen, so the two
+	// zones disagree about which day this belongs to. Falling back to UTC when
+	// a timezone cannot be resolved is what made this invisible.
+	line := `{"type":"assistant","uuid":"tz2","timestamp":"2026-08-19T23:30:00Z","message":{"model":"claude-sonnet","usage":{"input_tokens":1000,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}`
+	if err := os.WriteFile(filepath.Join(logDir, "events.jsonl"), []byte(line+"\n"), 0o600); err != nil {
+		t.Fatalf("write log file: %v", err)
+	}
+
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+
+	utc, err := computeAt(accountHome, "UTC", 1, now, DefaultRates())
+	if err != nil {
+		t.Fatalf("compute in UTC: %v", err)
+	}
+	if utc.Today.Tokens != 0 {
+		t.Fatalf("in UTC the event falls on the previous day, got %d tokens today", utc.Today.Tokens)
+	}
+
+	copenhagen, err := computeAt(accountHome, "Europe/Copenhagen", 1, now, DefaultRates())
+	if err != nil {
+		t.Skipf("zoneinfo unavailable: %v", err)
+	}
+	if copenhagen.Today.Tokens != 1000 {
+		t.Fatalf("in Europe/Copenhagen the event falls on today, got %d tokens", copenhagen.Today.Tokens)
+	}
+}
+
+func TestComputeAtSkipsAFifoNamedLikeALog(t *testing.T) {
+	accountHome := t.TempDir()
+	logDir := filepath.Join(accountHome, "projects", "sample")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+
+	line := `{"type":"assistant","uuid":"ok1","timestamp":"2026-08-20T11:00:00Z","message":{"model":"claude-sonnet","usage":{"input_tokens":100,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}`
+	if err := os.WriteFile(filepath.Join(logDir, "real.jsonl"), []byte(line+"\n"), 0o600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	// os.Open on a FIFO blocks until a writer appears. One of these in
+	// projects/ parked a D-Bus handler goroutine forever, and every later call
+	// leaked another one.
+	if err := syscall.Mkfifo(filepath.Join(logDir, "trap.jsonl"), 0o600); err != nil {
+		t.Skipf("mkfifo unavailable: %v", err)
+	}
+
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+	done := make(chan snapshot.ConsumedUsage, 1)
+	go func() {
+		got, err := computeAt(accountHome, "UTC", 1, now, DefaultRates())
+		if err != nil {
+			t.Errorf("compute: %v", err)
+		}
+		done <- got
+	}()
+
+	select {
+	case got := <-done:
+		if got.Today.Tokens != 100 {
+			t.Fatalf("the real log should still be counted, got %d tokens", got.Today.Tokens)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("computeAt blocked on a FIFO named *.jsonl")
+	}
+}
+
+func TestComputeAtSkipsASymlinkedLog(t *testing.T) {
+	accountHome := t.TempDir()
+	logDir := filepath.Join(accountHome, "projects", "sample")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+
+	outside := filepath.Join(t.TempDir(), "elsewhere.jsonl")
+	line := `{"type":"assistant","uuid":"out1","timestamp":"2026-08-20T11:00:00Z","message":{"model":"claude-sonnet","usage":{"input_tokens":999,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}`
+	if err := os.WriteFile(outside, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatalf("write outside log: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(logDir, "linked.jsonl")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+	got, err := computeAt(accountHome, "UTC", 1, now, DefaultRates())
+	if err != nil {
+		t.Fatalf("compute: %v", err)
+	}
+	if got.Today.Tokens != 0 {
+		t.Fatalf("a symlink out of the Account Home must not be read, got %d tokens", got.Today.Tokens)
+	}
 }

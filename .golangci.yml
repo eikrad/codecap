@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2026 eikrad <eikef.rades@protonmail.com>
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+# errcheck, govet, ineffassign, staticcheck and unused are on by default in v2.
+version: "2"
+
+linters:
+  enable:
+    - gosec
+
+  settings:
+    gosec:
+      excludes:
+        # G101 flags the console.anthropic.com URL constant and the obviously
+        # fake tokens in fixtures. No real credential is in the tree.
+        - G101
+        # G304 is correct but premature: opening a caller-supplied path is
+        # findings C-4 and H-1 in docs/audit-2026-08-22.md. Phase 2.3 and 2.5
+        # add the O_NOFOLLOW and regular-file checks; drop this exclusion then.
+        - G304
+
+  exclusions:
+    rules:
+      # Test fixtures create world-readable dirs on purpose.
+      - path: _test\.go
+        linters:
+          - gosec

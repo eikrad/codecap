@@ -4,30 +4,90 @@
 package usagewatch
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 )
+
+// MaxWatchers bounds how many Account Homes are watched at once.
+//
+// Each one is an inotify instance plus one watch per subdirectory, and inotify
+// instances are a per-user resource: exhausting them breaks file watching for
+// the whole desktop session, not just this helper. Account Homes arrive as
+// D-Bus arguments, so the registry has to be bounded.
+const MaxWatchers = 8
+
+// DefaultDebounce coalesces a burst of filesystem events into one notification.
+//
+// Claude Code appends to a log many times a second. Every event used to emit a
+// Changed signal, each of which made the plasmoid call GetSnapshot, which
+// re-read the entire log corpus — the watcher fed the exact work it was meant
+// to avoid.
+const DefaultDebounce = time.Second
 
 type Manager struct {
 	mu       sync.Mutex
 	watchers map[string]*watchInstance
 	onChange func(accountHome string)
+	debounce time.Duration
+	now      func() time.Time
 }
 
 type watchInstance struct {
-	watcher *fsnotify.Watcher
-	done    chan struct{}
+	watcher  *fsnotify.Watcher
+	done     chan struct{}
+	lastSeen time.Time
+
+	timerMu sync.Mutex
+	timer   *time.Timer
 }
 
-func NewManager(onChange func(accountHome string)) *Manager {
+func NewManager(onChange func(accountHome string), debounce time.Duration) *Manager {
+	if debounce <= 0 {
+		debounce = DefaultDebounce
+	}
 	return &Manager{
 		watchers: make(map[string]*watchInstance),
 		onChange: onChange,
+		debounce: debounce,
+		now:      func() time.Time { return time.Now() },
+	}
+}
+
+// notify schedules one notification per debounce window. The first event in a
+// burst arms the timer; the rest are dropped.
+func (m *Manager) notify(accountHome string, instance *watchInstance) {
+	instance.timerMu.Lock()
+	defer instance.timerMu.Unlock()
+	if instance.timer != nil {
+		return
+	}
+	instance.timer = time.AfterFunc(m.debounce, func() {
+		instance.timerMu.Lock()
+		instance.timer = nil
+		instance.timerMu.Unlock()
+
+		select {
+		case <-instance.done:
+			return
+		default:
+		}
+		m.onChange(accountHome)
+	})
+}
+
+func (instance *watchInstance) stopTimer() {
+	instance.timerMu.Lock()
+	defer instance.timerMu.Unlock()
+	if instance.timer != nil {
+		instance.timer.Stop()
+		instance.timer = nil
 	}
 }
 
@@ -37,7 +97,8 @@ func (m *Manager) Ensure(accountHome string) {
 	}
 
 	m.mu.Lock()
-	if _, ok := m.watchers[accountHome]; ok {
+	if instance, ok := m.watchers[accountHome]; ok {
+		instance.lastSeen = m.now()
 		m.mu.Unlock()
 		return
 	}
@@ -62,20 +123,61 @@ func (m *Manager) Ensure(accountHome string) {
 	}
 
 	instance := &watchInstance{
-		watcher: watcher,
-		done:    make(chan struct{}),
+		watcher:  watcher,
+		done:     make(chan struct{}),
+		lastSeen: m.now(),
 	}
 
 	m.mu.Lock()
-	if _, ok := m.watchers[accountHome]; ok {
+	if existing, ok := m.watchers[accountHome]; ok {
+		existing.lastSeen = m.now()
 		m.mu.Unlock()
 		_ = watcher.Close()
 		return
 	}
+	m.evictLocked()
 	m.watchers[accountHome] = instance
 	m.mu.Unlock()
 
 	go m.loop(accountHome, projectsDir, instance)
+}
+
+// evictLocked closes the least recently requested watcher to make room.
+func (m *Manager) evictLocked() {
+	if len(m.watchers) < MaxWatchers {
+		return
+	}
+	oldestKey := ""
+	var oldestSeen time.Time
+	for key, instance := range m.watchers {
+		if oldestKey == "" || instance.lastSeen.Before(oldestSeen) {
+			oldestKey = key
+			oldestSeen = instance.lastSeen
+		}
+	}
+	if oldestKey == "" {
+		return
+	}
+	log.Printf("dropping usage watch for %s: watch limit %d reached", oldestKey, MaxWatchers)
+	m.closeInstanceLocked(oldestKey)
+}
+
+func (m *Manager) closeInstanceLocked(accountHome string) {
+	instance, ok := m.watchers[accountHome]
+	if !ok {
+		return
+	}
+	close(instance.done)
+	instance.stopTimer()
+	_ = instance.watcher.Close()
+	delete(m.watchers, accountHome)
+}
+
+// Forget stops watching one Account Home.
+func (m *Manager) Forget(accountHome string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closeInstanceLocked(accountHome)
 }
 
 func (m *Manager) Close() error {
@@ -85,16 +187,13 @@ func (m *Manager) Close() error {
 	var errs []error
 	for accountHome, instance := range m.watchers {
 		close(instance.done)
+		instance.stopTimer()
 		if err := instance.watcher.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("close watcher for %s: %w", accountHome, err))
 		}
 	}
 	m.watchers = make(map[string]*watchInstance)
-
-	if len(errs) == 0 {
-		return nil
-	}
-	return errorsJoin(errs...)
+	return errors.Join(errs...)
 }
 
 func (m *Manager) loop(accountHome, projectsDir string, instance *watchInstance) {
@@ -119,7 +218,7 @@ func (m *Manager) loop(accountHome, projectsDir string, instance *watchInstance)
 			}
 
 			if isUnderDir(event.Name, projectsDir) {
-				m.onChange(accountHome)
+				m.notify(accountHome, instance)
 			}
 		case err, ok := <-instance.watcher.Errors:
 			if !ok {
@@ -133,12 +232,23 @@ func (m *Manager) loop(accountHome, projectsDir string, instance *watchInstance)
 func addRecursive(watcher *fsnotify.Watcher, root string) error {
 	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return err
+			// One unreadable project directory must not abort the whole watch.
+			if path == root {
+				return err
+			}
+			log.Printf("skip watch for %s: %v", path, err)
+			return nil
 		}
 		if !d.IsDir() {
 			return nil
 		}
-		return watcher.Add(path)
+		if err := watcher.Add(path); err != nil {
+			if path == root {
+				return err
+			}
+			log.Printf("skip watch for %s: %v", path, err)
+		}
+		return nil
 	})
 }
 
@@ -147,29 +257,5 @@ func isUnderDir(path, dir string) bool {
 	if err != nil {
 		return false
 	}
-	if rel == ".." || startsWithParent(rel) {
-		return false
-	}
-	return true
-}
-
-func startsWithParent(path string) bool {
-	return len(path) >= 3 && path[0:3] == ".."+string(filepath.Separator)
-}
-
-func errorsJoin(errs ...error) error {
-	filtered := make([]error, 0, len(errs))
-	for _, err := range errs {
-		if err != nil {
-			filtered = append(filtered, err)
-		}
-	}
-	if len(filtered) == 0 {
-		return nil
-	}
-	msg := filtered[0].Error()
-	for i := 1; i < len(filtered); i++ {
-		msg += "; " + filtered[i].Error()
-	}
-	return fmt.Errorf("%s", msg)
+	return filepath.IsLocal(rel) || rel == "."
 }

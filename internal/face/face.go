@@ -63,10 +63,11 @@ func baseSnapshot(face snapshot.Face, accountHome string) snapshot.Snapshot {
 	}
 
 	return snapshot.Snapshot{
-		Face:         face,
-		AccountHome:  accountHome,
-		AccountLabel: accountLabel,
-		UsageCredit:  "none",
+		SchemaVersion: snapshot.SchemaVersion,
+		Face:          face,
+		AccountHome:   accountHome,
+		AccountLabel:  accountLabel,
+		UsageCredit:   "none",
 		ConsumedUsage: snapshot.ConsumedUsage{
 			Session: snapshot.ConsumedPeriod{},
 			Today:   snapshot.ConsumedPeriod{},

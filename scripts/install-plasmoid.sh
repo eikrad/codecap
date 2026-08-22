@@ -4,7 +4,7 @@
 
 set -eu
 
-ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
+ROOT="$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)"
 PLASMOID="$ROOT/plasmoid"
 
 if ! command -v kpackagetool6 >/dev/null 2>&1; then
