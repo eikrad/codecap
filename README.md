@@ -1,6 +1,8 @@
 # codecap
 
-A Plasma 6 widget that shows **how much of your Claude plan is left** and **how much you have used locally** — in one glance on the panel, desktop, or system tray.
+[![CI](https://github.com/eikrad/codecap/actions/workflows/ci.yml/badge.svg)](https://github.com/eikrad/codecap/actions/workflows/ci.yml)
+
+Plasma 6 applet plus a Go session helper that shows coding-agent usage and allowance.
 
 v1 targets **Claude Code** on **Plasma 6**. One widget instance is bound to one Account Home (for example `~/.claude`).
 
@@ -62,12 +64,13 @@ This installs:
 - User systemd unit `codecap.service`
 - Plasmoid under `/usr/share/plasma/plasmoids/dev.codecap.plasmoid/`
 
-**After install:** log out and back in, or restart Plasma (`kquitapp6 plasmashell && kstart plasmashell`), so the widget appears in the gallery.
-
-Optionally keep the helper running across crashes (it also starts automatically on the first widget call):
+CI runs on every push to `main` and on pull requests: `go vet`, `make test`, and `make test-install`.
 
 ```bash
-systemctl --user enable --now codecap.service
+make ci             # same checks as CI locally
+go test ./...       # helper unit tests only
+make test-install   # verify FHS install tree
+go run ./cmd/codecap
 ```
 
 ### Other distros
