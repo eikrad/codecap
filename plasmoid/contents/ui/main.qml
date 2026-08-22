@@ -3,6 +3,7 @@
 
 import QtQuick
 import QtQuick.Layouts
+import QtCore
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.plasma.plasmoid
@@ -12,16 +13,21 @@ import "logic.js" as Logic
 PlasmoidItem {
     id: root
 
-    property string accountHome: plasmoid.configuration.accountHome || ""
-    property bool isBound: accountHome.trim() !== ""
+    readonly property string homeDir: StandardPaths.writableLocation(StandardPaths.HomeLocation)
+
+    function resolvedAccountHome() {
+        return Logic.expandPath(Plasmoid.configuration.accountHome, homeDir)
+    }
+
+    readonly property bool isBound: resolvedAccountHome().trim() !== ""
     property var snapshot: Logic.emptySnapshot()
     property int nowUnix: Math.floor(Date.now() / 1000)
-    property real fxRate: plasmoid.configuration.fxRateUsdToDisplay || 1.0
-    property bool fxUsingUsdFallback: plasmoid.configuration.fxUsingUsdFallback || false
+    property real fxRate: Plasmoid.configuration.fxRateUsdToDisplay || 1.0
+    property bool fxUsingUsdFallback: Plasmoid.configuration.fxUsingUsdFallback || false
     property string fxNote: ""
 
     readonly property string displayCurrency: Logic.effectiveCurrency(
-        plasmoid.configuration.displayCurrency,
+        Plasmoid.configuration.displayCurrency,
         Qt.locale().name
     )
     readonly property bool helperAvailable: helperWatcher.registered
@@ -75,16 +81,17 @@ PlasmoidItem {
         if (!helperAvailable) {
             snapshot = Logic.emptySnapshot()
             snapshot.face = "unknown_allowance"
-            snapshot.account_home = accountHome
+            snapshot.account_home = resolvedAccountHome()
             return
         }
 
+        const home = resolvedAccountHome()
         DBus.SessionBus.asyncCall({
             "service": "dev.codecap.Helper",
             "path": "/dev/codecap/Helper",
             "iface": "dev.codecap.Helper",
             "member": "GetSnapshot",
-            "arguments": [accountHome, timezoneId(), weekStart()]
+            "arguments": [home, timezoneId(), weekStart()]
         }, function(result) {
             let payload = result
             if (payload && payload.value !== undefined) {
@@ -97,7 +104,7 @@ PlasmoidItem {
         }, function() {
             snapshot = Logic.emptySnapshot()
             snapshot.face = "unknown_allowance"
-            snapshot.account_home = accountHome
+            snapshot.account_home = resolvedAccountHome()
         })
     }
 
@@ -107,16 +114,16 @@ PlasmoidItem {
             fxRate = 1.0
             fxUsingUsdFallback = false
             fxNote = ""
-            plasmoid.configuration.fxRateUsdToDisplay = 1.0
-            plasmoid.configuration.fxUsingUsdFallback = false
-            plasmoid.configuration.fxFetchedAt = nowUnix
+            Plasmoid.configuration.fxRateUsdToDisplay = 1.0
+            Plasmoid.configuration.fxUsingUsdFallback = false
+            Plasmoid.configuration.fxFetchedAt = nowUnix
             return
         }
 
-        const fetchedAt = plasmoid.configuration.fxFetchedAt || 0
-        if (nowUnix - fetchedAt < 86400 && plasmoid.configuration.fxRateUsdToDisplay > 0) {
-            fxRate = plasmoid.configuration.fxRateUsdToDisplay
-            fxUsingUsdFallback = plasmoid.configuration.fxUsingUsdFallback || false
+        const fetchedAt = Plasmoid.configuration.fxFetchedAt || 0
+        if (nowUnix - fetchedAt < 86400 && Plasmoid.configuration.fxRateUsdToDisplay > 0) {
+            fxRate = Plasmoid.configuration.fxRateUsdToDisplay
+            fxUsingUsdFallback = Plasmoid.configuration.fxUsingUsdFallback || false
             fxNote = fxUsingUsdFallback ? i18n("Display currency rate unavailable; showing USD.") : ""
             return
         }
@@ -133,17 +140,17 @@ PlasmoidItem {
                     fxRate = rate
                     fxUsingUsdFallback = false
                     fxNote = ""
-                    plasmoid.configuration.fxRateUsdToDisplay = rate
-                    plasmoid.configuration.fxUsingUsdFallback = false
-                    plasmoid.configuration.fxFetchedAt = Math.floor(Date.now() / 1000)
+                    Plasmoid.configuration.fxRateUsdToDisplay = rate
+                    Plasmoid.configuration.fxUsingUsdFallback = false
+                    Plasmoid.configuration.fxFetchedAt = Math.floor(Date.now() / 1000)
                     return
                 }
             }
             fxRate = 1.0
             fxUsingUsdFallback = true
             fxNote = i18n("Display currency rate unavailable; showing USD.")
-            plasmoid.configuration.fxRateUsdToDisplay = 1.0
-            plasmoid.configuration.fxUsingUsdFallback = true
+            Plasmoid.configuration.fxRateUsdToDisplay = 1.0
+            Plasmoid.configuration.fxUsingUsdFallback = true
         }
         xhr.open("GET", "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml")
         xhr.send()
@@ -184,7 +191,7 @@ PlasmoidItem {
                 return
             }
             const changedHome = message.arguments.length > 0 ? message.arguments[0] : ""
-            if (changedHome === root.accountHome) {
+            if (changedHome === root.resolvedAccountHome()) {
                 root.updateSnapshot()
             }
         }
@@ -197,7 +204,12 @@ PlasmoidItem {
         onTriggered: root.updateSnapshot()
     }
 
-    onAccountHomeChanged: updateSnapshot()
+    Connections {
+        target: Plasmoid
+        function onConfigurationChanged() {
+            root.updateSnapshot()
+        }
+    }
 
     Connections {
         target: helperWatcher

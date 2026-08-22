@@ -8,6 +8,13 @@ import { loadLogic } from "./load-logic.mjs";
 const Logic = loadLogic();
 const colors = { disabled: "gray", negative: "red", neutral: "orange", highlight: "blue" };
 
+test("expandPath resolves tilde and home-relative paths", () => {
+    assert.equal(Logic.expandPath("", "/home/me"), "")
+    assert.equal(Logic.expandPath("~", "/home/me"), "/home/me")
+    assert.equal(Logic.expandPath("~/.claude", "/home/me"), "/home/me/.claude")
+    assert.equal(Logic.expandPath("/home/me/.claude", "/home/me"), "/home/me/.claude")
+})
+
 test("parseSnapshot returns unbound empty snapshot for invalid JSON", () => {
     const snap = Logic.parseSnapshot("not-json");
     assert.equal(snap.face, "unbound");
