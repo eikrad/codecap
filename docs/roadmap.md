@@ -4,6 +4,8 @@ v1 sequence. Domain is [`CONTEXT.md`](../CONTEXT.md); architecture and visual ar
 
 Each phase should be runnable on this machine before the next starts. Phase 4 may begin once phase 1’s snapshot JSON is real.
 
+Phases 0–5 are implemented on `main`. Optional follow-ups: AUR publish, Get New Widgets packaging.
+
 ## v1
 
 0. **Repo hygiene** — rename `Claude-counter` → `codecap`; licence **GPL-2.0-or-later** (SPDX/REUSE headers + `LICENSES/`); `git init`; GitHub repo **`eikrad/codecap`** (public — AUR and Get New Widgets need a public source tarball). English UI with `i18n()` wrappers.
