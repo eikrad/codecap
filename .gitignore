@@ -1,5 +1,8 @@
 bin/
 dist/
+.install-test/
+pkg/
+src/
 *.pkg.tar.zst
 *.pkg.tar.zst.sig
 .env
