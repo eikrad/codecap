@@ -26,13 +26,23 @@ QMLLINT_FLAGS := --import disable --type disable --property disable \
 
 QML_SOURCES := plasmoid/contents/ui/*.qml plasmoid/contents/config/*.qml
 
-.PHONY: build install test test-plasmoid test-install \
+.PHONY: build install install-all test test-plasmoid test-install \
 	lint fmt-check lint-go lint-sh lint-qml ci clean
 
 build:
 	$(GO) build $(BUILD_FLAGS) -o bin/$(BINARY) ./cmd/codecap
 
-install: build
+# install deliberately does NOT depend on build. It runs under sudo, and a
+# rebuild as root inside the user's checkout fails outright — git refuses to
+# operate on a repository it does not own, and go build reports that as
+# "error obtaining VCS status: exit status 128". Even when it succeeds it
+# leaves root-owned files in bin/. Build as yourself, then install.
+install:
+	@test -f bin/$(BINARY) || { \
+		echo "bin/$(BINARY) not found. Run 'make build' as your own user first,"; \
+		echo "or use 'make install-all' to build and install in one step."; \
+		exit 1; \
+	}
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 755 bin/$(BINARY) $(DESTDIR)$(BINDIR)/$(BINARY)
 	install -d $(DESTDIR)$(DBUSDIR)
@@ -69,10 +79,18 @@ test:
 test-plasmoid:
 	node --test plasmoid/test/*.test.mjs
 
+install-all: build install
+
 ci: lint test test-install
 
-test-install:
+test-install: build
 	rm -rf .install-test
+	@if $(MAKE) -n install DESTDIR=$(CURDIR)/.install-test | grep -q '$(GO) build'; then \
+		echo "FAIL: make install would run the Go toolchain."; \
+		echo "It runs under sudo, and a rebuild as root fails on VCS ownership and"; \
+		echo "leaves root-owned files in bin/. See the comment on the install target."; \
+		exit 1; \
+	fi
 	$(MAKE) install DESTDIR=$(CURDIR)/.install-test
 	scripts/verify-install.sh $(CURDIR)/.install-test
 	rm -rf .install-test
