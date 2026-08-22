@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eikrad/codecap/internal/allowance"
 	"github.com/eikrad/codecap/internal/face"
 	"github.com/eikrad/codecap/internal/snapshot"
 	"github.com/eikrad/codecap/internal/usage"
@@ -27,11 +28,14 @@ const (
 type Server struct {
 	conn       *dbus.Conn
 	logWatches *usagewatch.Manager
+	allowance  *allowance.Service
+	poller     *allowance.Poller
 }
 
 func (s *Server) GetSnapshot(accountHome, timezone string, weekStart int32) (string, *dbus.Error) {
 	snap := face.Classify(accountHome)
 	s.addConsumedUsage(&snap, timezone, weekStart)
+	s.addAllowance(&snap)
 	s.ensureWatch(accountHome)
 
 	data, err := json.Marshal(snap)
@@ -42,10 +46,13 @@ func (s *Server) GetSnapshot(accountHome, timezone string, weekStart int32) (str
 }
 
 func Export(conn *dbus.Conn) error {
+	lastKnown := allowance.NewLastKnownStore(allowance.DefaultCacheRoot())
 	server := &Server{
-		conn: conn,
+		conn:      conn,
+		allowance: allowance.NewService(lastKnown),
 	}
 	server.logWatches = usagewatch.NewManager(server.emitChanged)
+	server.poller = allowance.NewPoller(allowance.PollInterval, server.pollAccountHome)
 
 	if err := conn.Export(server, ObjectPath, InterfaceName); err != nil {
 		return fmt.Errorf("export helper interface: %w", err)
@@ -87,7 +94,7 @@ func Export(conn *dbus.Conn) error {
 }
 
 func (s *Server) addConsumedUsage(snap *snapshot.Snapshot, timezone string, weekStart int32) {
-	if snap.Face != snapshot.FaceUnknownAllowance {
+	if snap.Face != snapshot.FaceUnknownAllowance && snap.Face != snapshot.FaceReady {
 		return
 	}
 
@@ -97,7 +104,38 @@ func (s *Server) addConsumedUsage(snap *snapshot.Snapshot, timezone string, week
 		return
 	}
 	snap.ConsumedUsage = usageSnapshot
-	snap.FetchedAt = time.Now().Unix()
+	if snap.FetchedAt == 0 {
+		snap.FetchedAt = time.Now().Unix()
+	}
+}
+
+func (s *Server) addAllowance(snap *snapshot.Snapshot) {
+	if s.allowance == nil {
+		return
+	}
+	if snap.Face != snapshot.FaceUnknownAllowance && snap.Face != snapshot.FaceReady {
+		return
+	}
+
+	fields, err := s.allowance.Resolve(snap.AccountHome)
+	if err != nil {
+		log.Printf("resolve allowance failed for %s: %v", snap.AccountHome, err)
+	}
+	if fields.Face != "" {
+		snap.Face = fields.Face
+	}
+	snap.SessionAllowance = fields.SessionAllowance
+	snap.WeeklyAllowance = fields.WeeklyAllowance
+	if fields.UsageCredit != "" {
+		snap.UsageCredit = fields.UsageCredit
+	}
+	if fields.FetchedAt != 0 {
+		snap.FetchedAt = fields.FetchedAt
+	}
+
+	if s.poller != nil {
+		s.poller.Ensure(snap.AccountHome)
+	}
 }
 
 func (s *Server) ensureWatch(accountHome string) {
@@ -108,6 +146,16 @@ func (s *Server) ensureWatch(accountHome string) {
 		return
 	}
 	s.logWatches.Ensure(accountHome)
+}
+
+func (s *Server) pollAccountHome(accountHome string) {
+	if s.allowance == nil {
+		return
+	}
+	if _, err := s.allowance.Resolve(accountHome); err != nil {
+		log.Printf("poll allowance failed for %s: %v", accountHome, err)
+	}
+	s.emitChanged(accountHome)
 }
 
 func (s *Server) emitChanged(accountHome string) {

@@ -6,11 +6,12 @@ The applet is QML-only and talks to a local session helper over D-Bus. The helpe
 
 ## Status
 
-This repository is currently implementing roadmap phases 0-1:
+This repository is currently implementing roadmap phase 3+:
 
-- repo hygiene
 - helper skeleton (`GetSnapshot` / `Changed`)
-- smoke plasmoid to verify D-Bus integration
+- Consumed Usage from Account Home logs
+- Session / Weekly Allowance via unofficial OAuth usage fetch + Last-Known cache
+- smoke plasmoid to verify D-Bus integration (visual rings/bars still phase 4)
 
 ## Run helper (development)
 
