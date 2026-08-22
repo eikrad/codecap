@@ -12,6 +12,9 @@ cd "$ROOT"
 echo "Building codecap helper..."
 make build
 
+echo "Installing system-wide (sudo required)..."
+sudo make install
+
 if [ -d "$LOCAL_PLASMOID" ]; then
 	echo "Removing user-local plasmoid (system install uses /usr/share)..."
 	if command -v kpackagetool6 >/dev/null 2>&1; then
@@ -20,9 +23,6 @@ if [ -d "$LOCAL_PLASMOID" ]; then
 		rm -rf "$LOCAL_PLASMOID"
 	fi
 fi
-
-echo "Installing system-wide (sudo required)..."
-sudo make install
 
 cat <<EOF
 

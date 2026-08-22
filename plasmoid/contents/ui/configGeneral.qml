@@ -3,43 +3,49 @@
 
 import QtQuick
 import QtQuick.Controls as QQC2
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import org.kde.kquickcontrolsaddons as KQuickControlsAddons
 
-Kirigami.FormLayout {
+Item {
     id: page
+    width: childrenRect.width
+    height: childrenRect.height
 
     property alias cfg_accountHome: accountHomeField.text
     property alias cfg_displayCurrency: displayCurrencyField.text
 
-    RowLayout {
-        Kirigami.FormData.label: i18n("Account Home:")
-        Layout.fillWidth: true
-        spacing: Kirigami.Units.smallSpacing
+    Kirigami.FormLayout {
+        anchors.left: parent.left
+        anchors.right: parent.right
+
+        RowLayout {
+            Kirigami.FormData.label: i18n("Account Home:")
+            Layout.fillWidth: true
+            spacing: Kirigami.Units.smallSpacing
+
+            QQC2.TextField {
+                id: accountHomeField
+                Layout.fillWidth: true
+                placeholderText: "~/.claude"
+            }
+
+            QQC2.Button {
+                text: i18n("Browse…")
+                onClicked: folderDialog.open()
+            }
+        }
 
         QQC2.TextField {
-            id: accountHomeField
-            Layout.fillWidth: true
-            placeholderText: "~/.claude"
-        }
-
-        QQC2.Button {
-            text: i18n("Browse…")
-            onClicked: folderDialog.open()
+            id: displayCurrencyField
+            Kirigami.FormData.label: i18n("Display Currency:")
+            placeholderText: i18n("Locale default (for example DKK)")
         }
     }
 
-    QQC2.TextField {
-        id: displayCurrencyField
-        Kirigami.FormData.label: i18n("Display Currency:")
-        placeholderText: i18n("Locale default (for example DKK)")
-    }
-
-    KQuickControlsAddons.FileDialog {
+    FolderDialog {
         id: folderDialog
-        selectFolder: true
         title: i18n("Choose Account Home")
-        onAccepted: accountHomeField.text = selectedFile.toLocalFile()
+        onAccepted: accountHomeField.text = selectedFolder.toLocalFile()
     }
 }
