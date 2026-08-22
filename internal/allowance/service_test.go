@@ -4,6 +4,7 @@
 package allowance
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -35,7 +36,7 @@ func TestServiceResolveReadyOnLiveFetch(t *testing.T) {
 	svc.APIBaseURL = usageServer.URL
 	svc.TokenBaseURL = usageServer.URL
 
-	got, err := svc.Resolve(accountHome)
+	got, err := svc.Resolve(context.Background(), accountHome)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -69,7 +70,7 @@ func TestServiceResolveSignedOutWhenRefreshRejected(t *testing.T) {
 	svc.TokenBaseURL = tokenServer.URL
 	svc.Now = func() time.Time { return time.Unix(10, 0).UTC() }
 
-	got, err := svc.Resolve(accountHome)
+	got, err := svc.Resolve(context.Background(), accountHome)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -104,7 +105,7 @@ func TestServiceResolveSignedOutWhenUnauthorizedRefreshRejected(t *testing.T) {
 	svc.APIBaseURL = server.URL
 	svc.TokenBaseURL = server.URL
 
-	got, err := svc.Resolve(accountHome)
+	got, err := svc.Resolve(context.Background(), accountHome)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -130,15 +131,99 @@ func TestServiceResolveUnknownAllowanceWhenFetchFailsWithoutLastKnownCache(t *te
 	svc.APIBaseURL = usageServer.URL
 	svc.TokenBaseURL = usageServer.URL
 
-	got, err := svc.Resolve(accountHome)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
+	got, err := svc.Resolve(context.Background(), accountHome)
+	// The face is still usable, but the reason is reported rather than dropped:
+	// the caller cannot otherwise tell "no Allowance" from "could not fetch it".
+	if err == nil {
+		t.Fatal("expected the fetch failure to be reported")
 	}
 	if got.Face != snapshot.FaceUnknownAllowance {
 		t.Fatalf("face: got %q want unknown_allowance", got.Face)
 	}
 	if got.UsageCredit != "none" {
 		t.Fatalf("usage credit: got %q want none", got.UsageCredit)
+	}
+}
+
+func TestServiceResolveDoesNotBurnRefreshGrantOnTransientStatus(t *testing.T) {
+	for _, status := range []int{http.StatusForbidden, http.StatusTooManyRequests, http.StatusInternalServerError} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			accountHome := t.TempDir()
+			writeCreds(t, accountHome, time.Now().Add(time.Hour).UnixMilli())
+
+			var refreshes int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v1/oauth/token" {
+					refreshes++
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte(`{"access_token":"new","refresh_token":"new-refresh","expires_in":3600}`))
+					return
+				}
+				w.Header().Set("Retry-After", "120")
+				w.WriteHeader(status)
+			}))
+			t.Cleanup(server.Close)
+
+			svc := NewService(NewLastKnownStore(t.TempDir()))
+			svc.HTTPClient = server.Client()
+			svc.APIBaseURL = server.URL
+			svc.TokenBaseURL = server.URL
+
+			got, err := svc.Resolve(context.Background(), accountHome)
+			if err == nil {
+				t.Fatal("expected a transient failure to be reported")
+			}
+			// A 403 from rate limiting used to be read as "the token is bad",
+			// so every poll tick rotated the refresh grant.
+			if refreshes != 0 {
+				t.Fatalf("status %d must not force a refresh, got %d", status, refreshes)
+			}
+			if got.Face != snapshot.FaceUnknownAllowance {
+				t.Fatalf("face: got %q want unknown_allowance", got.Face)
+			}
+			if wait, ok := RetryAfter(err); !ok || wait != 2*time.Minute {
+				t.Fatalf("Retry-After: got %v (%v) want 2m", wait, ok)
+			}
+		})
+	}
+}
+
+func TestServiceResolveRefreshesOnUnauthorized(t *testing.T) {
+	accountHome := t.TempDir()
+	writeCreds(t, accountHome, time.Now().Add(time.Hour).UnixMilli())
+
+	var refreshes, usageCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/oauth/token" {
+			refreshes++
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"access_token":"new","refresh_token":"new-refresh","expires_in":3600}`))
+			return
+		}
+		usageCalls++
+		if usageCalls == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"five_hour":{"utilization":10,"resets_at":"2026-08-20T12:00:00Z"}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	svc := NewService(NewLastKnownStore(t.TempDir()))
+	svc.HTTPClient = server.Client()
+	svc.APIBaseURL = server.URL
+	svc.TokenBaseURL = server.URL
+
+	got, err := svc.Resolve(context.Background(), accountHome)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if refreshes != 1 {
+		t.Fatalf("401 should force exactly one refresh, got %d", refreshes)
+	}
+	if got.Face != snapshot.FaceReady {
+		t.Fatalf("face: got %q want ready", got.Face)
 	}
 }
 
@@ -165,7 +250,7 @@ func TestServiceResolveUsesLastKnownWhenFetchFails(t *testing.T) {
 	svc.APIBaseURL = usageServer.URL
 	svc.TokenBaseURL = usageServer.URL
 
-	got, err := svc.Resolve(accountHome)
+	got, err := svc.Resolve(context.Background(), accountHome)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}

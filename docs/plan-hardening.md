@@ -14,7 +14,8 @@ Finding IDs (`C-2`, `P-C1`, …) refer to the audit.
 |---|---|
 | **0 · Gates** | **Done.** `make lint` and `make ci` are green locally; CI runs three parallel jobs. |
 | **1 · Make it work** | **Code done, not yet run on a Plasma 6 desktop.** See the caveat below. |
-| 2–6 | Not started. |
+| **2 · Stop the bleeding** | **Done.** One deviation from 2.1, recorded below. |
+| 3–6 | Not started. |
 
 **What Phase 1 has not had.** None of the QML changes have been executed on a real
 Plasma 6 session — this work was done in a container with no Plasma, no Kirigami and
@@ -33,6 +34,22 @@ Four of the eight critical findings were *non-existent names* — `onReceivedSig
 written from the upstream sources cited in the audit, but only a real desktop can
 confirm they fire. **Please run the Phase 1 "Done when" checklist below before trusting
 it.** Phase 5.2 and 5.3 exist to remove exactly this blind spot.
+
+**Deviation in 2.1.** The plan said to move the vendor call outside the credentials
+lock. It is still inside it, deliberately: two processes rotating the same refresh
+grant would invalidate each other, and the lock is the only thing preventing that.
+What made holding it dangerous was the *absence of a timeout* — an indefinite hang
+wedged the helper for the session. Now the call is bounded by `httpx.Timeout` (15 s),
+the lock wait is 20 s so a waiter cannot give up while the holder is legitimately
+refreshing, and `EnsureAccessToken` has a lock-free fast path for the common case
+where the token is still valid, so concurrent `GetSnapshot` calls never touch the
+lock at all. If the grant ever stops being rotated on refresh, moving the call out
+becomes the better trade.
+
+**Coverage after phase 2** — `accounthome` 100 %, `usage` 80.5 %, `allowance` 77.8 %,
+`dbusapi` 72.3 %, `usagewatch` 66.7 %, `creds` 62.2 %. The poller went from 0 % to
+covered; `Export` is no longer untestable, because `NewServer` now takes its
+dependencies (finding M-14, pulled forward from 5.8).
 
 ---
 

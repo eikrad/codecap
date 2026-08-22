@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/eikrad/codecap/internal/snapshot"
@@ -130,6 +131,13 @@ func listJSONLFiles(accountHome string) ([]string, error) {
 		if d.IsDir() {
 			return nil
 		}
+		// WalkDir reports the entry type from lstat, so this also rejects
+		// symlinks, FIFOs and device nodes. A FIFO named *.jsonl blocked
+		// os.Open until a writer appeared, which parked a D-Bus handler
+		// goroutine forever.
+		if !d.Type().IsRegular() {
+			return nil
+		}
 		if strings.HasSuffix(d.Name(), ".jsonl") {
 			files = append(files, path)
 		}
@@ -139,11 +147,23 @@ func listJSONLFiles(accountHome string) ([]string, error) {
 }
 
 func consumeFile(path string, session, today, week, month period, loc *time.Location, rates Rates, seen map[string]struct{}) (snapshot.ConsumedUsage, error) {
-	file, err := os.Open(path)
+	// O_NOFOLLOW because the walk saw an lstat, not the target; O_NONBLOCK so
+	// that opening anything that is not a plain file cannot block. Both are
+	// belt and braces over the IsRegular check in listJSONLFiles, since the
+	// tree can change between the walk and the open.
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return snapshot.ConsumedUsage{}, err
 	}
 	defer func() { _ = file.Close() }()
+
+	info, err := file.Stat()
+	if err != nil {
+		return snapshot.ConsumedUsage{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return snapshot.ConsumedUsage{}, fmt.Errorf("%s is not a regular file", path)
+	}
 
 	return consumeReader(file, session, today, week, month, loc, rates, seen)
 }

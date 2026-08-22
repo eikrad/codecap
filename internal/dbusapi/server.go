@@ -4,14 +4,16 @@
 package dbusapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
+	"github.com/eikrad/codecap/internal/accounthome"
 	"github.com/eikrad/codecap/internal/allowance"
 	"github.com/eikrad/codecap/internal/face"
+	"github.com/eikrad/codecap/internal/httpx"
 	"github.com/eikrad/codecap/internal/snapshot"
 	"github.com/eikrad/codecap/internal/usage"
 	"github.com/eikrad/codecap/internal/usagewatch"
@@ -23,6 +25,16 @@ const (
 	ServiceName   = "dev.codecap.Helper"
 	InterfaceName = "dev.codecap.Helper"
 	ObjectPath    = dbus.ObjectPath("/dev/codecap/Helper")
+
+	// snapshotTimeout bounds one GetSnapshot. godbus dispatches every method
+	// call in its own goroutine, so without a deadline a stuck call leaks one
+	// goroutine per attempt.
+	snapshotTimeout = httpx.Timeout + 10*time.Second
+
+	// maxConcurrentSnapshots limits how much work unbounded incoming calls can
+	// buy. Several widget instances share one helper, so a small number is
+	// enough for legitimate use.
+	maxConcurrentSnapshots = 4
 )
 
 type Server struct {
@@ -30,13 +42,33 @@ type Server struct {
 	logWatches *usagewatch.Manager
 	allowance  *allowance.Service
 	poller     *allowance.Poller
+	ctx        context.Context
+	cancel     context.CancelFunc
+	inFlight   chan struct{}
 }
 
-func (s *Server) GetSnapshot(accountHome, timezone string, weekStart int32) (string, *dbus.Error) {
-	snap := face.Classify(accountHome)
+func (s *Server) GetSnapshot(rawAccountHome, timezone string, weekStart int32) (string, *dbus.Error) {
+	// The Account Home is a plain string from any session-bus peer and is used
+	// as a filesystem base throughout the helper.
+	home, err := accounthome.Validate(rawAccountHome)
+	if err != nil {
+		return "", dbus.MakeFailedError(err)
+	}
+
+	select {
+	case s.inFlight <- struct{}{}:
+		defer func() { <-s.inFlight }()
+	case <-s.ctx.Done():
+		return "", dbus.MakeFailedError(s.ctx.Err())
+	}
+
+	ctx, cancel := context.WithTimeout(s.ctx, snapshotTimeout)
+	defer cancel()
+
+	snap := face.Classify(home)
 	s.addConsumedUsage(&snap, timezone, weekStart)
-	s.addAllowance(&snap)
-	s.ensureWatch(accountHome)
+	s.addAllowance(ctx, &snap)
+	s.ensureWatch(&snap)
 
 	data, err := json.Marshal(snap)
 	if err != nil {
@@ -45,20 +77,57 @@ func (s *Server) GetSnapshot(accountHome, timezone string, weekStart int32) (str
 	return string(data), nil
 }
 
-func Export(conn *dbus.Conn) error {
-	lastKnown := allowance.NewLastKnownStore(allowance.DefaultCacheRoot())
+// NewServer builds a helper server without publishing it on the bus.
+//
+// conn may be nil, in which case Changed signals are dropped. Export uses this,
+// and so do tests that drive GetSnapshot directly; the previous version built
+// every dependency inside Export, which is why Export itself had no test.
+func NewServer(ctx context.Context, conn *dbus.Conn, allowanceService *allowance.Service) *Server {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	serverCtx, cancel := context.WithCancel(ctx)
+
 	server := &Server{
 		conn:      conn,
-		allowance: allowance.NewService(lastKnown),
+		allowance: allowanceService,
+		ctx:       serverCtx,
+		cancel:    cancel,
+		inFlight:  make(chan struct{}, maxConcurrentSnapshots),
 	}
 	server.logWatches = usagewatch.NewManager(server.emitChanged)
-	server.poller = allowance.NewPoller(allowance.PollInterval, server.pollAccountHome)
+	server.poller = allowance.NewPoller(serverCtx, allowance.PollInterval, server.pollAccountHome)
+	return server
+}
+
+// Export publishes the helper interface and returns the server so the caller can
+// shut it down.
+func Export(ctx context.Context, conn *dbus.Conn) (*Server, error) {
+	lastKnown := allowance.NewLastKnownStore(allowance.DefaultCacheRoot())
+	server := NewServer(ctx, conn, allowance.NewService(lastKnown))
 
 	if err := conn.Export(server, ObjectPath, InterfaceName); err != nil {
-		return fmt.Errorf("export helper interface: %w", err)
+		_ = server.Close()
+		return nil, fmt.Errorf("export helper interface: %w", err)
 	}
 
-	node := &introspect.Node{
+	node := introspectNode()
+
+	if err := conn.Export(introspect.NewIntrospectable(node), ObjectPath, "org.freedesktop.DBus.Introspectable"); err != nil {
+		_ = server.Close()
+		return nil, fmt.Errorf("export introspection: %w", err)
+	}
+	return server, nil
+}
+
+// IntrospectNode is the interface description published on the bus. It is the
+// contract the plasmoid's asyncCall signature has to match.
+func IntrospectNode() *introspect.Node {
+	return introspectNode()
+}
+
+func introspectNode() *introspect.Node {
+	return &introspect.Node{
 		Name: string(ObjectPath),
 		Interfaces: []introspect.Interface{
 			{
@@ -86,11 +155,16 @@ func Export(conn *dbus.Conn) error {
 			introspect.IntrospectData,
 		},
 	}
+}
 
-	if err := conn.Export(introspect.NewIntrospectable(node), ObjectPath, "org.freedesktop.DBus.Introspectable"); err != nil {
-		return fmt.Errorf("export introspection: %w", err)
+// Close stops background work and releases the file watches.
+func (s *Server) Close() error {
+	s.cancel()
+	s.poller.Stop()
+	if s.logWatches == nil {
+		return nil
 	}
-	return nil
+	return s.logWatches.Close()
 }
 
 func (s *Server) addConsumedUsage(snap *snapshot.Snapshot, timezone string, weekStart int32) {
@@ -109,7 +183,7 @@ func (s *Server) addConsumedUsage(snap *snapshot.Snapshot, timezone string, week
 	}
 }
 
-func (s *Server) addAllowance(snap *snapshot.Snapshot) {
+func (s *Server) addAllowance(ctx context.Context, snap *snapshot.Snapshot) {
 	if s.allowance == nil {
 		return
 	}
@@ -117,7 +191,7 @@ func (s *Server) addAllowance(snap *snapshot.Snapshot) {
 		return
 	}
 
-	fields, err := s.allowance.Resolve(snap.AccountHome)
+	fields, err := s.allowance.Resolve(ctx, snap.AccountHome)
 	if err != nil {
 		log.Printf("resolve allowance failed for %s: %v", snap.AccountHome, err)
 	}
@@ -138,24 +212,29 @@ func (s *Server) addAllowance(snap *snapshot.Snapshot) {
 	}
 }
 
-func (s *Server) ensureWatch(accountHome string) {
-	if s.logWatches == nil {
+// ensureWatch starts a log watch only for an Account Home that classified as a
+// real, signed-in one. It used to run for every call, before any face check, so
+// any directory containing a projects/ subdirectory bought an inotify instance.
+func (s *Server) ensureWatch(snap *snapshot.Snapshot) {
+	if s.logWatches == nil || snap.AccountHome == "" {
 		return
 	}
-	if strings.TrimSpace(accountHome) == "" {
+	if snap.Face != snapshot.FaceUnknownAllowance && snap.Face != snapshot.FaceReady {
 		return
 	}
-	s.logWatches.Ensure(accountHome)
+	s.logWatches.Ensure(snap.AccountHome)
 }
 
-func (s *Server) pollAccountHome(accountHome string) {
+func (s *Server) pollAccountHome(ctx context.Context, accountHome string) error {
 	if s.allowance == nil {
-		return
+		return nil
 	}
-	if _, err := s.allowance.Resolve(accountHome); err != nil {
+	if _, err := s.allowance.Resolve(ctx, accountHome); err != nil {
 		log.Printf("poll allowance failed for %s: %v", accountHome, err)
+		return err
 	}
 	s.emitChanged(accountHome)
+	return nil
 }
 
 func (s *Server) emitChanged(accountHome string) {
