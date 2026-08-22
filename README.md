@@ -51,7 +51,15 @@ makepkg -fd
 sudo pacman -U codecap-*.pkg.tar.zst
 ```
 
-Or install directly without a package:
+Or install directly from a clone (helper + plasmoid + D-Bus + systemd in one step):
+
+```bash
+git clone https://github.com/eikrad/codecap.git
+cd codecap
+./scripts/install.sh
+```
+
+Equivalent manual install:
 
 ```bash
 sudo make install
@@ -104,7 +112,10 @@ Run `claude` and sign in for that Account Home, or fix the path in Configure.
 Vendor fetch failed; the helper shows the last good bars for up to an hour. Consumed Usage from logs still updates.
 
 **Widget not in gallery after install**  
-Restart `plasmashell` or re-login.
+Restart `plasmashell` or re-login. If you previously used `kpackagetool6 --install`, run `./scripts/install.sh` so the system-wide copy under `/usr/share` is used instead of a stale user-local one.
+
+**`kpackagetool6` says plasmoid already exists**  
+Use `./scripts/install-plasmoid.sh` (upgrade) or `./scripts/install.sh` (full system install, removes user-local copy first).
 
 **Manual snapshot check**
 
@@ -120,8 +131,8 @@ go test ./...           # helper unit tests
 make test-install       # verify FHS install tree
 go run ./cmd/codecap    # helper in foreground
 
-kpackagetool6 --type Plasma/Applet --install ./plasmoid   # user-local plasmoid
-# use --upgrade on later runs
+./scripts/install.sh           # full system install (first time)
+./scripts/install-plasmoid.sh  # user-local plasmoid only (QML dev)
 ```
 
 Architecture, domain language, and design decisions: [`docs/design.md`](docs/design.md), [`CONTEXT.md`](CONTEXT.md), [`docs/roadmap.md`](docs/roadmap.md).
