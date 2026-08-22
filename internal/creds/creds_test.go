@@ -41,6 +41,56 @@ func TestLoadReadsOAuthAccessToken(t *testing.T) {
 	}
 }
 
+func TestLoadParsesExpiresAtEpochSeconds(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, CredentialsFileName)
+	const epochSeconds int64 = 1_700_000_000
+	payload := `{
+		"claudeAiOauth": {
+			"accessToken": "sk-ant-oat01-aaa",
+			"refreshToken": "sk-ant-ort01-bbb",
+			"expiresAt": 1700000000
+		}
+	}`
+	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write credentials: %v", err)
+	}
+
+	oauth, err := Load(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	want := time.Unix(epochSeconds, 0).UTC()
+	if !oauth.ExpiresAt.Equal(want) {
+		t.Fatalf("expiresAt: got %v want %v", oauth.ExpiresAt, want)
+	}
+}
+
+func TestLoadParsesExpiresAtEpochMilliseconds(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, CredentialsFileName)
+	const epochMillis int64 = 1_700_000_000_000
+	payload := `{
+		"claudeAiOauth": {
+			"accessToken": "sk-ant-oat01-aaa",
+			"refreshToken": "sk-ant-ort01-bbb",
+			"expiresAt": 1700000000000
+		}
+	}`
+	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write credentials: %v", err)
+	}
+
+	oauth, err := Load(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	want := time.UnixMilli(epochMillis).UTC()
+	if !oauth.ExpiresAt.Equal(want) {
+		t.Fatalf("expiresAt: got %v want %v", oauth.ExpiresAt, want)
+	}
+}
+
 func TestEnsureAccessTokenRefreshesAndPreservesSiblingFields(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, CredentialsFileName)

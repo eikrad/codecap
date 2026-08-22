@@ -13,7 +13,7 @@ PLASMOIDDIR := $(PREFIX)/share/plasma/plasmoids/dev.codecap.plasmoid
 
 BUILD_FLAGS := -trimpath -ldflags="-s -w"
 
-.PHONY: build install test test-install ci clean
+.PHONY: build install test test-plasmoid test-install ci clean
 
 build:
 	$(GO) build $(BUILD_FLAGS) -o bin/$(BINARY) ./cmd/codecap
@@ -30,6 +30,10 @@ install: build
 
 test:
 	$(GO) test ./...
+	$(MAKE) test-plasmoid
+
+test-plasmoid:
+	node --test plasmoid/test/*.test.mjs
 
 ci: test test-install
 
