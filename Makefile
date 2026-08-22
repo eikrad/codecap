@@ -82,8 +82,15 @@ lint-qml:
 
 lint: lint-go lint-sh lint-qml
 
+# The bus tests need a session bus. dbus-run-session gives them a private one;
+# without it they skip locally and fail in CI, rather than quietly passing.
 test:
-	$(GO) test -race ./...
+	@if command -v dbus-run-session >/dev/null 2>&1; then \
+		dbus-run-session -- $(GO) test -race ./...; \
+	else \
+		echo "dbus-run-session not found: the bus tests will skip"; \
+		$(GO) test -race ./...; \
+	fi
 	$(MAKE) test-plasmoid
 
 test-plasmoid:
