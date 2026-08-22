@@ -169,17 +169,32 @@ PlasmoidItem {
     Component.onCompleted: {
         refreshFxRate()
         updateSnapshot()
-        DBus.SessionBus.connect({
-            "service": "dev.codecap.Helper",
-            "path": "/dev/codecap/Helper",
-            "iface": "dev.codecap.Helper",
-            "member": "Changed",
-            "signature": "s"
-        }, function(changedHome) {
+    }
+
+    DBus.SignalWatcher {
+        id: helperChangedWatcher
+        enabled: root.isBound && root.helperAvailable
+        busType: DBus.BusType.Session
+        service: "dev.codecap.Helper"
+        path: "/dev/codecap/Helper"
+        iface: "dev.codecap.Helper"
+
+        function onReceivedSignal(message) {
+            if (message.member !== "Changed") {
+                return
+            }
+            const changedHome = message.arguments.length > 0 ? message.arguments[0] : ""
             if (changedHome === root.accountHome) {
                 root.updateSnapshot()
             }
-        })
+        }
+    }
+
+    Timer {
+        interval: 30000
+        running: root.isBound && root.helperAvailable
+        repeat: true
+        onTriggered: root.updateSnapshot()
     }
 
     onAccountHomeChanged: updateSnapshot()
