@@ -8,6 +8,34 @@ phase — it is in [Decisions needed](#decisions-needed) at the end.
 
 Finding IDs (`C-2`, `P-C1`, …) refer to the audit.
 
+## Status
+
+| Phase | State |
+|---|---|
+| **0 · Gates** | **Done.** `make lint` and `make ci` are green locally; CI runs three parallel jobs. |
+| **1 · Make it work** | **Code done, not yet run on a Plasma 6 desktop.** See the caveat below. |
+| 2–6 | Not started. |
+
+**What Phase 1 has not had.** None of the QML changes have been executed on a real
+Plasma 6 session — this work was done in a container with no Plasma, no Kirigami and
+no D-Bus session bus. What they have had:
+
+- `qmllint` over every `.qml` file (syntax and structure only; Plasma and Kirigami
+  types still cannot be resolved, so a wrong property name on a Plasma type would
+  still pass).
+- 18 Node tests over `logic.js`, including a regression test for each JS-side bug.
+- Go tests for the timezone contract, including one that fails if day boundaries stop
+  following the zone they are given.
+
+Four of the eight critical findings were *non-existent names* — `onReceivedSignal`,
+`onConfigurationChanged`, `onHighlightColorChanged` — and the replacements
+(`dbusChanged`, `onConfiguredAccountHomeChanged`) are the same kind of name. They are
+written from the upstream sources cited in the audit, but only a real desktop can
+confirm they fire. **Please run the Phase 1 "Done when" checklist below before trusting
+it.** Phase 5.2 and 5.3 exist to remove exactly this blind spot.
+
+---
+
 ## The shape of the problem
 
 The audit found 4 + 4 critical items, and they split cleanly in two:

@@ -198,3 +198,113 @@ func joinLines(lines []string) string {
 	}
 	return out
 }
+
+func TestResolveLocationEmptyMeansHelperLocalZone(t *testing.T) {
+	loc, err := resolveLocation("")
+	if err != nil {
+		t.Fatalf("resolve empty timezone: %v", err)
+	}
+	if loc != time.Local {
+		t.Fatalf("expected time.Local for the empty timezone, got %v", loc)
+	}
+
+	loc, err = resolveLocation("  ")
+	if err != nil {
+		t.Fatalf("resolve blank timezone: %v", err)
+	}
+	if loc != time.Local {
+		t.Fatalf("expected time.Local for a blank timezone, got %v", loc)
+	}
+}
+
+func TestResolveLocationAcceptsIANAIDsAndRejectsDisplayNames(t *testing.T) {
+	if _, err := resolveLocation("Europe/Copenhagen"); err != nil {
+		t.Fatalf("resolve IANA id: %v", err)
+	}
+
+	// These are what Date.prototype.toString() produces. Treating them as a
+	// silent UTC fallback moved every day, week and month boundary for users
+	// outside UTC.
+	for _, name := range []string{
+		"Central European Summer Time",
+		"CEST",
+		"Coordinated Universal Time",
+		"not a zone",
+	} {
+		if _, err := resolveLocation(name); err == nil {
+			t.Fatalf("expected %q to be rejected, got no error", name)
+		}
+	}
+}
+
+func TestComputeAtRejectsUnresolvableTimezone(t *testing.T) {
+	accountHome := t.TempDir()
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+
+	if _, err := computeAt(accountHome, "Central European Summer Time", 1, now, DefaultRates()); err == nil {
+		t.Fatal("expected an unresolvable timezone to be reported, got no error")
+	}
+}
+
+func TestComputeAtEmptyTimezoneMatchesTheHelperLocalZone(t *testing.T) {
+	accountHome := t.TempDir()
+	logDir := filepath.Join(accountHome, "projects", "sample")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	line := `{"type":"assistant","uuid":"tz1","timestamp":"2026-08-19T23:30:00Z","message":{"model":"claude-sonnet","usage":{"input_tokens":1000,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}`
+	if err := os.WriteFile(filepath.Join(logDir, "events.jsonl"), []byte(line+"\n"), 0o600); err != nil {
+		t.Fatalf("write log file: %v", err)
+	}
+
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+
+	// time.Local is fixed at process start, so this asserts the equivalence
+	// rather than a particular zone: an empty argument must behave exactly like
+	// naming the zone the helper is running in.
+	explicit, err := computeAt(accountHome, time.Local.String(), 1, now, DefaultRates())
+	if err != nil {
+		t.Fatalf("compute with explicit local zone: %v", err)
+	}
+	implicit, err := computeAt(accountHome, "", 1, now, DefaultRates())
+	if err != nil {
+		t.Fatalf("compute with empty zone: %v", err)
+	}
+	if implicit != explicit {
+		t.Fatalf("empty timezone should equal %q: got %+v want %+v",
+			time.Local.String(), implicit, explicit)
+	}
+}
+
+func TestComputeAtDayBoundaryFollowsTheGivenZone(t *testing.T) {
+	accountHome := t.TempDir()
+	logDir := filepath.Join(accountHome, "projects", "sample")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	// 23:30 UTC on the 19th is 01:30 on the 20th in Copenhagen, so the two
+	// zones disagree about which day this belongs to. Falling back to UTC when
+	// a timezone cannot be resolved is what made this invisible.
+	line := `{"type":"assistant","uuid":"tz2","timestamp":"2026-08-19T23:30:00Z","message":{"model":"claude-sonnet","usage":{"input_tokens":1000,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}`
+	if err := os.WriteFile(filepath.Join(logDir, "events.jsonl"), []byte(line+"\n"), 0o600); err != nil {
+		t.Fatalf("write log file: %v", err)
+	}
+
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+
+	utc, err := computeAt(accountHome, "UTC", 1, now, DefaultRates())
+	if err != nil {
+		t.Fatalf("compute in UTC: %v", err)
+	}
+	if utc.Today.Tokens != 0 {
+		t.Fatalf("in UTC the event falls on the previous day, got %d tokens today", utc.Today.Tokens)
+	}
+
+	copenhagen, err := computeAt(accountHome, "Europe/Copenhagen", 1, now, DefaultRates())
+	if err != nil {
+		t.Skipf("zoneinfo unavailable: %v", err)
+	}
+	if copenhagen.Today.Tokens != 1000 {
+		t.Fatalf("in Europe/Copenhagen the event falls on today, got %d tokens", copenhagen.Today.Tokens)
+	}
+}

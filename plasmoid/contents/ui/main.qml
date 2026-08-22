@@ -13,24 +13,37 @@ import "logic.js" as Logic
 PlasmoidItem {
     id: root
 
-    readonly property string homeDir: StandardPaths.writableLocation(StandardPaths.HomeLocation)
+    // QML's StandardPaths returns a url, so this is "file:///home/you" until
+    // the scheme is stripped.
+    readonly property string homeDir: Logic.stripFileScheme(StandardPaths.writableLocation(StandardPaths.HomeLocation))
+
+    // Plasma::Applet has no configurationChanged signal, so configuration is
+    // mirrored into real properties whose own change signals do fire.
+    readonly property string configuredAccountHome: Plasmoid.configuration.accountHome
+    readonly property string configuredCurrency: Plasmoid.configuration.displayCurrency
 
     function resolvedAccountHome() {
-        return Logic.expandPath(Plasmoid.configuration.accountHome, homeDir)
+        return Logic.expandPath(configuredAccountHome, homeDir)
     }
 
     readonly property bool isBound: resolvedAccountHome().trim() !== ""
     property var snapshot: Logic.emptySnapshot()
     property int nowUnix: Math.floor(Date.now() / 1000)
-    property real fxRate: Plasmoid.configuration.fxRateUsdToDisplay || 1.0
-    property bool fxUsingUsdFallback: Plasmoid.configuration.fxUsingUsdFallback || false
+    property real fxRate: 1.0
+    property bool fxUsingUsdFallback: false
     property string fxNote: ""
 
+    // Replies from a superseded request or a previous Account Home are dropped.
+    property int snapshotRequestSeq: 0
+
     readonly property string displayCurrency: Logic.effectiveCurrency(
-        Plasmoid.configuration.displayCurrency,
+        configuredCurrency,
         Qt.locale().name
     )
     readonly property bool helperAvailable: helperWatcher.registered
+
+    onConfiguredAccountHomeChanged: updateSnapshot()
+    onConfiguredCurrencyChanged: refreshFxRate()
 
     DBus.DBusServiceWatcher {
         id: helperWatcher
@@ -47,7 +60,9 @@ PlasmoidItem {
 
     Timer {
         id: fxTimer
-        interval: 60000
+        // The rate is cached for a day; a minute timer just re-checked the
+        // cache, and on failure re-fetched, 1440 times a day.
+        interval: 3600000
         running: true
         repeat: true
         onTriggered: root.refreshFxRate()
@@ -57,74 +72,120 @@ PlasmoidItem {
         return Qt.locale().firstDayOfWeek
     }
 
-    function timezoneId() {
-        const now = new Date()
-        const fallback = now.toString().match(/\(([^)]+)\)$/)
-        if (fallback && fallback.length > 1) {
-            return fallback[1]
+    // Assigning the property fires the change signal; mutating the object
+    // afterwards does not, so every face has to be built before it is assigned.
+    function applyLocalFace(face) {
+        const next = Logic.emptySnapshot()
+        next.face = face
+        if (face !== "unbound") {
+            next.account_home = resolvedAccountHome()
         }
-        return "UTC"
+        snapshot = next
     }
 
-    function applySnapshotPayload(payload) {
-        snapshot = Logic.parseSnapshot(payload)
+    // A failed or unreadable call must not blank the popup. ADR 0006 keeps
+    // Last-Known Allowance visible with staleness shown.
+    function markSnapshotStale() {
+        const previous = root.snapshot
+        if (previous && previous.face === "ready") {
+            const next = Logic.normalizeSnapshot(previous)
+            next.session_allowance.stale = true
+            next.weekly_allowance.stale = true
+            snapshot = next
+            return
+        }
+        applyLocalFace("unknown_allowance")
+    }
+
+    function applySnapshotPayload(result) {
+        let payload = result
+        if (payload && payload.value !== undefined) {
+            payload = payload.value
+        }
+        if (Array.isArray(payload) && payload.length > 0) {
+            payload = payload[0]
+        }
+        const parsed = Logic.parseSnapshot(payload)
+        if (parsed === null) {
+            // Unreadable helper output is Unknown Allowance, not Unbound.
+            markSnapshotStale()
+            return
+        }
+        snapshot = parsed
         nowUnix = Math.floor(Date.now() / 1000)
     }
 
     function updateSnapshot() {
         if (!isBound) {
-            snapshot = Logic.emptySnapshot()
-            snapshot.face = "unbound"
+            applyLocalFace("unbound")
             return
         }
 
         if (!helperAvailable) {
-            snapshot = Logic.emptySnapshot()
-            snapshot.face = "unknown_allowance"
-            snapshot.account_home = resolvedAccountHome()
+            applyLocalFace("unknown_allowance")
             return
         }
 
         const home = resolvedAccountHome()
+        const seq = ++snapshotRequestSeq
+
         DBus.SessionBus.asyncCall({
             "service": "dev.codecap.Helper",
             "path": "/dev/codecap/Helper",
             "iface": "dev.codecap.Helper",
             "member": "GetSnapshot",
-            "arguments": [home, timezoneId(), weekStart()]
+            // Without a signature the call first costs an Introspect round-trip,
+            // and an unencoded argument can fail to match the declared ssi.
+            "signature": "ssi",
+            // An empty timezone means "the helper's own zone". Qt's JS engine
+            // has no Intl, so QML cannot produce an IANA id, and the display
+            // name it can produce resolves to UTC.
+            "arguments": [home, "", weekStart()]
         }, function(result) {
-            let payload = result
-            if (payload && payload.value !== undefined) {
-                payload = payload.value
+            if (seq !== root.snapshotRequestSeq || home !== root.resolvedAccountHome()) {
+                return
             }
-            if (Array.isArray(payload) && payload.length > 0) {
-                payload = payload[0]
-            }
-            applySnapshotPayload(payload)
+            root.applySnapshotPayload(result)
         }, function() {
-            snapshot = Logic.emptySnapshot()
-            snapshot.face = "unknown_allowance"
-            snapshot.account_home = resolvedAccountHome()
+            if (seq !== root.snapshotRequestSeq || home !== root.resolvedAccountHome()) {
+                return
+            }
+            root.markSnapshotStale()
         })
+    }
+
+    function applyFxRate(rate, usingFallback) {
+        fxRate = rate
+        fxUsingUsdFallback = usingFallback
+        fxNote = usingFallback ? i18n("Display currency rate unavailable; showing USD.") : ""
+    }
+
+    function cacheFxRate(rate, usingFallback) {
+        // Recorded on failure too, so a failed fetch backs off for a day
+        // instead of retrying on every timer tick.
+        Plasmoid.configuration.fxRateUsdToDisplay = rate
+        Plasmoid.configuration.fxUsingUsdFallback = usingFallback
+        Plasmoid.configuration.fxCurrency = root.displayCurrency
+        Plasmoid.configuration.fxFetchedAt = Math.floor(Date.now() / 1000)
     }
 
     function refreshFxRate() {
         const currency = displayCurrency
         if (currency === "USD") {
-            fxRate = 1.0
-            fxUsingUsdFallback = false
-            fxNote = ""
-            Plasmoid.configuration.fxRateUsdToDisplay = 1.0
-            Plasmoid.configuration.fxUsingUsdFallback = false
-            Plasmoid.configuration.fxFetchedAt = nowUnix
+            // No fetch and no config write: this branch used to dirty the
+            // applet config once a minute for the whole session.
+            applyFxRate(1.0, false)
             return
         }
 
         const fetchedAt = Plasmoid.configuration.fxFetchedAt || 0
-        if (nowUnix - fetchedAt < 86400 && Plasmoid.configuration.fxRateUsdToDisplay > 0) {
-            fxRate = Plasmoid.configuration.fxRateUsdToDisplay
-            fxUsingUsdFallback = Plasmoid.configuration.fxUsingUsdFallback || false
-            fxNote = fxUsingUsdFallback ? i18n("Display currency rate unavailable; showing USD.") : ""
+        const cachedCurrency = Plasmoid.configuration.fxCurrency || ""
+        // A cached rate is only usable for the currency it was fetched for.
+        if (cachedCurrency === currency
+                && nowUnix - fetchedAt < 86400
+                && Plasmoid.configuration.fxRateUsdToDisplay > 0) {
+            applyFxRate(Plasmoid.configuration.fxRateUsdToDisplay,
+                        Plasmoid.configuration.fxUsingUsdFallback || false)
             return
         }
 
@@ -136,21 +197,16 @@ PlasmoidItem {
             if (xhr.status === 200) {
                 const rates = Logic.parseEcbRates(xhr.responseText)
                 const rate = Logic.usdToDisplayRate(rates, currency)
+                // 0 means no rate was found. Showing USD amounts under another
+                // currency code would be worse than saying so.
                 if (rate > 0) {
-                    fxRate = rate
-                    fxUsingUsdFallback = false
-                    fxNote = ""
-                    Plasmoid.configuration.fxRateUsdToDisplay = rate
-                    Plasmoid.configuration.fxUsingUsdFallback = false
-                    Plasmoid.configuration.fxFetchedAt = Math.floor(Date.now() / 1000)
+                    root.applyFxRate(rate, false)
+                    root.cacheFxRate(rate, false)
                     return
                 }
             }
-            fxRate = 1.0
-            fxUsingUsdFallback = true
-            fxNote = i18n("Display currency rate unavailable; showing USD.")
-            Plasmoid.configuration.fxRateUsdToDisplay = 1.0
-            Plasmoid.configuration.fxUsingUsdFallback = true
+            root.applyFxRate(1.0, true)
+            root.cacheFxRate(1.0, true)
         }
         xhr.open("GET", "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml")
         xhr.send()
@@ -186,12 +242,11 @@ PlasmoidItem {
         path: "/dev/codecap/Helper"
         iface: "dev.codecap.Helper"
 
-        function onReceivedSignal(message) {
-            if (message.member !== "Changed") {
-                return
-            }
-            const changedHome = message.arguments.length > 0 ? message.arguments[0] : ""
-            if (changedHome === root.resolvedAccountHome()) {
+        // SignalWatcher has no receivedSignal signal: it looks up a function
+        // named "dbus" + the member name and calls it with the decoded
+        // arguments. Any other name is silently never called.
+        function dbusChanged(accountHome) {
+            if (accountHome === root.resolvedAccountHome()) {
                 root.updateSnapshot()
             }
         }
@@ -202,13 +257,6 @@ PlasmoidItem {
         running: root.isBound && root.helperAvailable
         repeat: true
         onTriggered: root.updateSnapshot()
-    }
-
-    Connections {
-        target: Plasmoid
-        function onConfigurationChanged() {
-            root.updateSnapshot()
-        }
     }
 
     Connections {
@@ -249,14 +297,28 @@ PlasmoidItem {
         return ""
     }
 
-    compactRepresentation: CompactRing {
-        face: root.snapshot.face
-        helperAvailable: root.helperAvailable
-        isBound: root.isBound
-        usedPercent: root.snapshot.session_allowance.used_percent
-        stale: root.snapshot.session_allowance.stale
-        usageCredit: root.snapshot.usage_credit
-        showNumeral: width >= Kirigami.Units.gridUnit * 2.5
+    // A custom compactRepresentation replaces DefaultCompactRepresentation,
+    // which is where Plasma's click-to-expand lives, so it has to be restored
+    // here or the expanded face is unreachable by mouse.
+    compactRepresentation: MouseArea {
+        id: compactRoot
+
+        implicitWidth: ring.implicitWidth
+        implicitHeight: ring.implicitHeight
+        acceptedButtons: Qt.LeftButton
+        onClicked: root.expanded = !root.expanded
+
+        CompactRing {
+            id: ring
+            anchors.fill: parent
+            face: root.snapshot.face
+            helperAvailable: root.helperAvailable
+            isBound: root.isBound
+            usedPercent: root.snapshot.session_allowance.used_percent
+            stale: root.snapshot.session_allowance.stale
+            usageCredit: root.snapshot.usage_credit
+            showNumeral: compactRoot.width >= Kirigami.Units.gridUnit * 2.5
+        }
     }
 
     fullRepresentation: Kirigami.ScrollablePage {

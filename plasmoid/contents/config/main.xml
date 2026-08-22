@@ -19,5 +19,10 @@
     <entry name="fxUsingUsdFallback" type="Bool">
       <default>false</default>
     </entry>
+    <!-- Which currency the cached rate was fetched for. Without it the cache
+         cannot be invalidated when Display Currency changes. -->
+    <entry name="fxCurrency" type="String">
+      <default></default>
+    </entry>
   </group>
 </kcfg>

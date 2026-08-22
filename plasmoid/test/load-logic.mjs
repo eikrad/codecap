@@ -15,6 +15,10 @@ export function loadLogic() {
         return {
             emptySnapshot,
             expandPath,
+            stripFileScheme,
+            finiteNumber,
+            normalizeWindow,
+            normalizePeriod,
             normalizeSnapshot,
             parseSnapshot,
             showAllowanceBars,

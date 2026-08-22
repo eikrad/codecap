@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -51,10 +52,29 @@ func ComputeWithRates(accountHome, timezone string, weekStart int32, rates Rates
 	return computeAt(accountHome, timezone, weekStart, time.Now().UTC(), rates)
 }
 
-func computeAt(accountHome, timezone string, weekStart int32, now time.Time, rates Rates) (snapshot.ConsumedUsage, error) {
-	loc, err := time.LoadLocation(strings.TrimSpace(timezone))
+// resolveLocation maps the bus timezone argument to a location.
+//
+// An empty string means "use the helper's own zone". Qt's JS engine has no Intl,
+// so the plasmoid cannot produce an IANA id; it runs in the same session, so
+// time.Local is the same zone the user sees. An unresolvable name is an error
+// rather than a silent fallback to UTC, which moved every day, week and month
+// boundary for users outside UTC without telling anyone.
+func resolveLocation(timezone string) (*time.Location, error) {
+	trimmed := strings.TrimSpace(timezone)
+	if trimmed == "" {
+		return time.Local, nil
+	}
+	loc, err := time.LoadLocation(trimmed)
 	if err != nil {
-		loc = time.UTC
+		return nil, fmt.Errorf("resolve timezone %q: %w", trimmed, err)
+	}
+	return loc, nil
+}
+
+func computeAt(accountHome, timezone string, weekStart int32, now time.Time, rates Rates) (snapshot.ConsumedUsage, error) {
+	loc, err := resolveLocation(timezone)
+	if err != nil {
+		return snapshot.ConsumedUsage{}, err
 	}
 
 	normalizedWeekStart := normalizeWeekStart(weekStart)
