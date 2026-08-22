@@ -229,3 +229,41 @@ test("normalizeDegraded tolerates anything the helper might send", () => {
     assert.deepEqual(Logic.normalizeDegraded([1, "", "pending", null, "x"]), ["pending", "x"]);
     assert.deepEqual(Logic.normalizeSnapshot({ face: "ready" }).degraded, []);
 });
+
+test("extractSnapshotPayload accepts every shape a D-Bus reply may take", () => {
+    const json = '{"schema_version":1,"face":"ready"}';
+    // The plasma binding documents the reply shape only by example, using a
+    // method that returns a dict. All of these are plausible for one "s".
+    assert.equal(Logic.extractSnapshotPayload(json), json);
+    assert.equal(Logic.extractSnapshotPayload({ value: json }), json);
+    assert.equal(Logic.extractSnapshotPayload([json]), json);
+    assert.equal(Logic.extractSnapshotPayload({ value: [json] }), json);
+    assert.equal(Logic.extractSnapshotPayload({ value: { snapshotJSON: json } }), json);
+    assert.equal(Logic.extractSnapshotPayload({ snapshotJSON: json }), json);
+    // An object keyed by something else still yields its one string.
+    assert.equal(Logic.extractSnapshotPayload({ value: { out0: json } }), json);
+});
+
+test("extractSnapshotPayload feeds parseSnapshot end to end", () => {
+    const json = '{"schema_version":1,"face":"ready","account_label":".claude"}';
+    for (const wrapped of [json, { value: json }, [json], { value: { snapshotJSON: json } }]) {
+        const snap = Logic.parseSnapshot(Logic.extractSnapshotPayload(wrapped));
+        assert.notEqual(snap, null);
+        assert.equal(snap.face, "ready");
+        assert.equal(snap.account_label, ".claude");
+    }
+});
+
+test("extractSnapshotPayload gives up rather than inventing a value", () => {
+    assert.equal(Logic.parseSnapshot(Logic.extractSnapshotPayload(undefined)), null);
+    assert.equal(Logic.parseSnapshot(Logic.extractSnapshotPayload({ value: 42 })), null);
+    assert.equal(Logic.parseSnapshot(Logic.extractSnapshotPayload([])), null);
+});
+
+test("describePayload names the shape for the log line", () => {
+    assert.equal(Logic.describePayload(undefined), "undefined");
+    assert.equal(Logic.describePayload(null), "null");
+    assert.equal(Logic.describePayload(["a"]), "array[1]");
+    assert.equal(Logic.describePayload({ value: 1, other: 2 }), "object{value,other}");
+    assert.ok(Logic.describePayload("hello").startsWith("string hello"));
+});

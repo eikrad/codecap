@@ -104,16 +104,16 @@ PlasmoidItem {
     }
 
     function applySnapshotPayload(result) {
-        let payload = result
-        if (payload && payload.value !== undefined) {
-            payload = payload.value
-        }
-        if (Array.isArray(payload) && payload.length > 0) {
-            payload = payload[0]
-        }
+        const payload = Logic.extractSnapshotPayload(result)
         const parsed = Logic.parseSnapshot(payload)
         if (parsed === null) {
-            // Unreadable helper output is Unknown Allowance, not Unbound.
+            // Unreadable helper output is Unknown Allowance, not Unbound. Say
+            // what arrived: the reply's shape is the only thing that identifies
+            // which case went unhandled, and a silent fallback here looked
+            // exactly like a helper that was not running.
+            console.warn("codecap: could not read the helper reply;",
+                         "outer:", Logic.describePayload(result),
+                         "unwrapped:", Logic.describePayload(payload))
             markSnapshotStale()
             return
         }

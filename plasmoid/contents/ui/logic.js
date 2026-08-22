@@ -136,6 +136,50 @@ function normalizeSnapshot(decoded) {
     return base
 }
 
+// The D-Bus reply value's shape is documented only by example, and the example
+// uses a method that returns a dict. For a single out-argument of type "s" the
+// value can arrive as the string itself, as a one-element list, or as an object
+// keyed by the out-argument name. Accept all three rather than assuming one.
+function extractSnapshotPayload(result) {
+    var payload = result
+    if (payload && typeof payload === "object" && payload.value !== undefined) {
+        payload = payload.value
+    }
+    if (Array.isArray(payload)) {
+        payload = payload.length > 0 ? payload[0] : ""
+    }
+    if (payload && typeof payload === "object") {
+        if (typeof payload.snapshotJSON === "string") {
+            return payload.snapshotJSON
+        }
+        for (var key in payload) {
+            if (typeof payload[key] === "string") {
+                return payload[key]
+            }
+        }
+    }
+    return payload
+}
+
+// describePayload is for the log line when a reply cannot be read: the shape is
+// the only thing that identifies which of the cases above went unhandled.
+function describePayload(value) {
+    if (value === null || value === undefined) {
+        return String(value)
+    }
+    if (typeof value !== "object") {
+        return typeof value + " " + String(value).substring(0, 120)
+    }
+    if (Array.isArray(value)) {
+        return "array[" + value.length + "]"
+    }
+    var keys = []
+    for (var key in value) {
+        keys.push(key)
+    }
+    return "object{" + keys.join(",") + "}"
+}
+
 // Returns null when the payload cannot be read at all. An unreadable reply is
 // not the same thing as "no Account Home chosen", and the caller is the only
 // place that knows which face to show instead.

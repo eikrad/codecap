@@ -22,6 +22,8 @@ export function loadLogic() {
             normalizePeriod,
             normalizeSnapshot,
             parseSnapshot,
+            extractSnapshotPayload,
+            describePayload,
             showAllowanceBars,
             compactIcon,
             formatTimeToReset,
