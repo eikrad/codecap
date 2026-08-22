@@ -135,9 +135,15 @@ PlasmoidItem {
             "path": "/dev/codecap/Helper",
             "iface": "dev.codecap.Helper",
             "member": "GetSnapshot",
-            // Without a signature the call first costs an Introspect round-trip,
-            // and an unencoded argument can fail to match the declared ssi.
-            "signature": "ssi",
+            // No signature on purpose. The library derives one from
+            // introspection, and dbusconnection.cpp builds it as
+            // '(' + types + ')' — the parenthesised struct form, as in the
+            // documented example "(u)" for a single uint32. Passing a bare
+            // "ssi" here made the encoder read only the first type and the
+            // call failed, which showed up as "Helper unavailable" while
+            // busctl worked fine. "(ssi)" is very likely correct and would
+            // save one round-trip per poll, but it cannot be tested without a
+            // Plasma session, and after phase 3 that round-trip costs nothing.
             // An empty timezone means "the helper's own zone". Qt's JS engine
             // has no Intl, so QML cannot produce an IANA id, and the display
             // name it can produce resolves to UTC.
@@ -148,13 +154,19 @@ PlasmoidItem {
             }
             root.helperReachable = true
             root.applySnapshotPayload(result)
-        }, function() {
+        }, function(failure) {
             if (seq !== root.snapshotRequestSeq || home !== root.resolvedAccountHome()) {
                 return
             }
             // The call itself failing is the signal that the helper is not
             // there — an activatable service that cannot be activated.
             root.helperReachable = false
+            // Say why. A silent reject is what made "Helper unavailable" mean
+            // four different things at once.
+            console.warn("codecap: GetSnapshot failed:",
+                         failure && failure.error && failure.error.message
+                             ? failure.error.message
+                             : failure)
             root.markSnapshotStale()
         })
     }
