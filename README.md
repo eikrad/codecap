@@ -1,5 +1,7 @@
 # codecap
 
+[![CI](https://github.com/eikrad/codecap/actions/workflows/ci.yml/badge.svg)](https://github.com/eikrad/codecap/actions/workflows/ci.yml)
+
 Plasma 6 applet plus a Go session helper that shows coding-agent usage and allowance.
 
 The applet is QML-only and talks to a local session helper over D-Bus. The helper owns Account Home access and never stores credentials in plasmoid config.
@@ -35,9 +37,12 @@ Add the **codecap** widget from the widget gallery and set Account Home in Confi
 
 ## Development
 
-Run helper without installing:
+CI runs on every push to `main` and on pull requests: `go vet`, `make test`, and `make test-install`.
 
 ```bash
+make ci             # same checks as CI locally
+go test ./...       # helper unit tests only
+make test-install   # verify FHS install tree
 go run ./cmd/codecap
 ```
 
