@@ -50,7 +50,11 @@ func (s *Service) Resolve(ctx context.Context, accountHome string) (SnapshotFiel
 	oauth, err := creds.EnsureAccessToken(ctx, accountHome, s.HTTPClient, s.TokenBaseURL, now)
 	if err != nil {
 		if errors.Is(err, creds.ErrRefreshRejected) {
-			return SnapshotFields{Face: snapshot.FaceSignedOut, UsageCredit: "none"}, nil
+			// Signed Out is a usable face, not a failure — but the cause is
+			// reported so it reaches the journal, and so the poller backs off
+			// instead of re-attempting a rejected grant every minute.
+			return SnapshotFields{Face: snapshot.FaceSignedOut, UsageCredit: "none"},
+				fmt.Errorf("account home %s is signed out: %w", accountHome, err)
 		}
 		return s.fallback(accountHome, now, err)
 	}
@@ -64,7 +68,8 @@ func (s *Service) Resolve(ctx context.Context, accountHome string) (SnapshotFiel
 			refreshedOAuth, refreshErr := creds.RefreshAccessToken(ctx, accountHome, s.HTTPClient, s.TokenBaseURL)
 			if refreshErr != nil {
 				if errors.Is(refreshErr, creds.ErrRefreshRejected) {
-					return SnapshotFields{Face: snapshot.FaceSignedOut, UsageCredit: "none"}, nil
+					return SnapshotFields{Face: snapshot.FaceSignedOut, UsageCredit: "none"},
+						fmt.Errorf("account home %s is signed out: %w", accountHome, refreshErr)
 				}
 				return s.fallback(accountHome, now, refreshErr)
 			}

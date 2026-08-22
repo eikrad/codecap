@@ -494,3 +494,50 @@ func TestFillFromCacheReaggregatesWhenTheWeekStartChanges(t *testing.T) {
 		t.Fatalf("expected the snapshot to be marked incomplete, got %v", snap.Degraded)
 	}
 }
+
+func TestSignedOutBacksThePollerOff(t *testing.T) {
+	accountHome := t.TempDir()
+	creds := fmt.Sprintf(`{"claudeAiOauth":{"accessToken":"sk-ant-oat01-test","refreshToken":"refresh","expiresAt":%d}}`,
+		time.Now().Add(-time.Hour).UnixMilli())
+	if err := os.WriteFile(filepath.Join(accountHome, ".credentials.json"), []byte(creds), 0o600); err != nil {
+		t.Fatalf("create credentials: %v", err)
+	}
+
+	var refreshAttempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/oauth/token" {
+			atomic.AddInt32(&refreshAttempts, 1)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(server.Close)
+
+	svc := allowance.NewService(allowance.NewLastKnownStore(t.TempDir()))
+	svc.HTTPClient = server.Client()
+	svc.APIBaseURL = server.URL
+	svc.TokenBaseURL = server.URL
+
+	helper := NewServer(context.Background(), nil, svc)
+	t.Cleanup(func() { _ = helper.Close() })
+
+	// A rejected grant does not become valid by asking again every minute, and
+	// each attempt is a request against the vendor.
+	err := helper.pollAccountHome(context.Background(), accountHome)
+	if err == nil {
+		t.Fatal("a signed-out account must be reported so the poller backs off")
+	}
+
+	// The face is still usable and still served.
+	state := helper.state(accountHome)
+	state.mu.Lock()
+	face := state.allowanceFields.Face
+	state.mu.Unlock()
+	if face != snapshot.FaceSignedOut {
+		t.Fatalf("face: got %q want signed_out", face)
+	}
+	if atomic.LoadInt32(&refreshAttempts) == 0 {
+		t.Fatal("expected the refresh to have been attempted once")
+	}
+}

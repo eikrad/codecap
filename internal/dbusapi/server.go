@@ -317,7 +317,7 @@ func (s *Server) scheduleRefresh(accountHome string, key usageKey) {
 		defer cancel()
 
 		usageChanged := s.refreshUsage(accountHome, key)
-		allowanceChanged := s.refreshAllowance(ctx, accountHome)
+		allowanceChanged, _ := s.refreshAllowance(ctx, accountHome)
 		if usageChanged || allowanceChanged {
 			s.emitChanged(accountHome)
 		}
@@ -345,18 +345,20 @@ func (s *Server) refreshUsage(accountHome string, key usageKey) bool {
 	return true
 }
 
-// refreshAllowance resolves live or Last-Known Allowance.
-func (s *Server) refreshAllowance(ctx context.Context, accountHome string) bool {
+// refreshAllowance resolves live or Last-Known Allowance. It reports both
+// whether anything usable was stored and why, if the resolve went wrong: a
+// Signed Out face is usable but still needs to back the poller off.
+func (s *Server) refreshAllowance(ctx context.Context, accountHome string) (bool, error) {
 	if s.allowance == nil {
-		return false
+		return false, nil
 	}
 	fields, err := s.allowance.Resolve(ctx, accountHome)
 	if err != nil {
-		log.Printf("resolve allowance failed for %s: %v", accountHome, err)
+		log.Printf("resolve allowance for %s: %v", accountHome, err)
 	}
 	// Even a failed resolve yields a usable face, from Last-Known or Signed Out.
 	if fields.Face == "" {
-		return false
+		return false, err
 	}
 
 	state := s.state(accountHome)
@@ -365,7 +367,7 @@ func (s *Server) refreshAllowance(ctx context.Context, accountHome string) bool 
 	state.allowanceAt = s.now()
 	state.allowanceOK = true
 	state.mu.Unlock()
-	return true
+	return true, err
 }
 
 // currentKey is the aggregation a watcher-driven recompute should use.
@@ -386,10 +388,16 @@ func (s *Server) onUsageChanged(accountHome string) {
 // pollAccountHome is the Allowance clock from ADR 0006. It also recomputes
 // Consumed Usage, because the reported windows roll over on their own.
 func (s *Server) pollAccountHome(ctx context.Context, accountHome string) error {
-	allowanceChanged := s.refreshAllowance(ctx, accountHome)
+	allowanceChanged, allowanceErr := s.refreshAllowance(ctx, accountHome)
 	usageChanged := s.refreshUsage(accountHome, s.currentKey(accountHome))
 	if allowanceChanged || usageChanged {
 		s.emitChanged(accountHome)
+	}
+	// Reporting the error backs the poller off. A rejected refresh grant does
+	// not become valid again by asking once a minute for the rest of the
+	// session, and each attempt is a request against the vendor.
+	if allowanceErr != nil {
+		return allowanceErr
 	}
 	if !allowanceChanged && s.allowance != nil {
 		return fmt.Errorf("allowance unavailable for %s", accountHome)

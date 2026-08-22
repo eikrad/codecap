@@ -6,6 +6,7 @@ package allowance
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eikrad/codecap/internal/creds"
 	"github.com/eikrad/codecap/internal/snapshot"
 )
 
@@ -71,8 +73,11 @@ func TestServiceResolveSignedOutWhenRefreshRejected(t *testing.T) {
 	svc.Now = func() time.Time { return time.Unix(10, 0).UTC() }
 
 	got, err := svc.Resolve(context.Background(), accountHome)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
+	// Signed Out is a usable face, but the cause is reported so it reaches the
+	// journal and so the poller backs off instead of re-attempting a rejected
+	// grant every minute.
+	if !errors.Is(err, creds.ErrRefreshRejected) {
+		t.Fatalf("expected the rejected refresh to be reported, got %v", err)
 	}
 	if got.Face != snapshot.FaceSignedOut {
 		t.Fatalf("face: got %q want signed_out", got.Face)
@@ -106,8 +111,8 @@ func TestServiceResolveSignedOutWhenUnauthorizedRefreshRejected(t *testing.T) {
 	svc.TokenBaseURL = server.URL
 
 	got, err := svc.Resolve(context.Background(), accountHome)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
+	if !errors.Is(err, creds.ErrRefreshRejected) {
+		t.Fatalf("expected the rejected refresh to be reported, got %v", err)
 	}
 	if usageCalls == 0 {
 		t.Fatal("expected usage fetch before refresh attempt")
