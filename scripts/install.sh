@@ -15,6 +15,15 @@ make build
 echo "Installing system-wide (sudo required)..."
 sudo make install
 
+# The helper stays up for the graphical session (ADR 0015), so installing a new
+# binary leaves the old process serving until logout. Stop it; the next widget
+# call re-activates it over D-Bus, now running what was just installed.
+if command -v pkill >/dev/null 2>&1; then
+	if pkill -x codecap 2>/dev/null; then
+		echo "Stopped the running helper; it restarts on the next widget call."
+	fi
+fi
+
 if [ -d "$LOCAL_PLASMOID" ]; then
 	echo "Removing user-local plasmoid (system install uses /usr/share)..."
 	if command -v kpackagetool6 >/dev/null 2>&1; then
