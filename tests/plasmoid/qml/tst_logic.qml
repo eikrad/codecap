@@ -56,6 +56,16 @@ TestCase {
         compare(Logic.formatMoney(3.5, 1, "USD", true, Qt.locale("en_US")), "3.50 USD")
     }
 
+    function test_a_url_value_has_no_toLocalFile() {
+        // The folder picker wrote `selectedFolder.toLocalFile()`. QML url
+        // values do not have that method, so the handler threw and choosing a
+        // folder silently did nothing. stripFileScheme is the conversion.
+        var u = Qt.url("file:///home/me/.claude")
+        compare(typeof u, "object")
+        compare(typeof u.toLocalFile, "undefined")
+        compare(Logic.stripFileScheme(u), "/home/me/.claude")
+    }
+
     function test_parseSnapshot_survives_real_engine_types() {
         compare(Logic.parseSnapshot("not-json"), null)
         var snap = Logic.parseSnapshot('{"schema_version":1,"face":"ready"}')

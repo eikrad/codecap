@@ -40,7 +40,13 @@ PlasmoidItem {
         configuredCurrency,
         Qt.locale().name
     )
-    readonly property bool helperAvailable: helperWatcher.registered
+    // DBusServiceWatcher.registered means "the service is running right now",
+    // not "the service can be started". The helper is D-Bus activated, so the
+    // first call is what starts it — refusing to call until it is registered
+    // means nothing ever starts it, and the widget sits on "Helper
+    // unavailable" for good. design.md:38 is explicit: the first widget call
+    // starts it, and a failed call is what maps to Unknown Allowance.
+    property bool helperReachable: true
 
     onConfiguredAccountHomeChanged: updateSnapshot()
     onConfiguredCurrencyChanged: refreshFxRate()
@@ -121,11 +127,6 @@ PlasmoidItem {
             return
         }
 
-        if (!helperAvailable) {
-            applyLocalFace("unknown_allowance")
-            return
-        }
-
         const home = resolvedAccountHome()
         const seq = ++snapshotRequestSeq
 
@@ -145,11 +146,15 @@ PlasmoidItem {
             if (seq !== root.snapshotRequestSeq || home !== root.resolvedAccountHome()) {
                 return
             }
+            root.helperReachable = true
             root.applySnapshotPayload(result)
         }, function() {
             if (seq !== root.snapshotRequestSeq || home !== root.resolvedAccountHome()) {
                 return
             }
+            // The call itself failing is the signal that the helper is not
+            // there — an activatable service that cannot be activated.
+            root.helperReachable = false
             root.markSnapshotStale()
         })
     }
@@ -250,7 +255,7 @@ PlasmoidItem {
 
     DBus.SignalWatcher {
         id: helperChangedWatcher
-        enabled: root.isBound && root.helperAvailable
+        enabled: root.isBound
         busType: DBus.BusType.Session
         service: "dev.codecap.Helper"
         path: "/dev/codecap/Helper"
@@ -268,7 +273,7 @@ PlasmoidItem {
 
     Timer {
         interval: 30000
-        running: root.isBound && root.helperAvailable
+        running: root.isBound
         repeat: true
         onTriggered: root.updateSnapshot()
     }
@@ -284,7 +289,7 @@ PlasmoidItem {
         if (!isBound) {
             return i18n("No Account Home")
         }
-        if (!helperAvailable || snapshot.face === "unknown_allowance") {
+        if (!helperReachable || snapshot.face === "unknown_allowance") {
             return i18n("Unknown Allowance")
         }
         if (snapshot.face === "signed_out") {
@@ -326,7 +331,7 @@ PlasmoidItem {
             id: ring
             anchors.fill: parent
             face: root.snapshot.face
-            helperAvailable: root.helperAvailable
+            helperAvailable: root.helperReachable
             isBound: root.isBound
             usedPercent: root.snapshot.session_allowance.used_percent
             stale: root.snapshot.session_allowance.stale
@@ -352,7 +357,7 @@ PlasmoidItem {
 
             Kirigami.PlaceholderMessage {
                 Layout.fillWidth: true
-                visible: root.isBound && !root.helperAvailable
+                visible: root.isBound && !root.helperReachable
                 icon.name: "question-symbolic"
                 text: i18n("Helper unavailable.")
                 explanation: i18n("Install or run the codecap helper to fetch Allowance.")
@@ -360,7 +365,7 @@ PlasmoidItem {
 
             Kirigami.PlaceholderMessage {
                 Layout.fillWidth: true
-                visible: root.isBound && root.helperAvailable && root.snapshot.face === "signed_out"
+                visible: root.isBound && root.helperReachable && root.snapshot.face === "signed_out"
                 icon.name: "unlock-symbolic"
                 text: i18n("Signed out.")
                 explanation: i18n("Sign in with Claude Code for this Account Home.")
@@ -419,7 +424,7 @@ PlasmoidItem {
 
             Kirigami.PlaceholderMessage {
                 Layout.fillWidth: true
-                visible: root.isBound && root.helperAvailable && root.snapshot.face === "unknown_allowance"
+                visible: root.isBound && root.helperReachable && root.snapshot.face === "unknown_allowance"
                 icon.name: "question-symbolic"
                 text: i18n("Unknown Allowance.")
                 explanation: i18n("Allowance is not available yet. Consumed Usage from local logs may still update.")

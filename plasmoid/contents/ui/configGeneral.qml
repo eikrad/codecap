@@ -6,6 +6,7 @@ import QtQuick.Controls as QQC2
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import "logic.js" as Logic
 
 // The FormLayout is the root item on purpose. It used to sit inside an Item
 // that took its width from childrenRect while the FormLayout anchored itself to
@@ -48,6 +49,9 @@ Kirigami.FormLayout {
     FolderDialog {
         id: folderDialog
         title: i18n("Choose Account Home")
-        onAccepted: accountHomeField.text = selectedFolder.toLocalFile()
+        // selectedFolder is a url value, and QML url values have no
+        // toLocalFile(): calling it threw, the handler died, and choosing a
+        // folder silently did nothing.
+        onAccepted: accountHomeField.text = Logic.stripFileScheme(selectedFolder)
     }
 }
