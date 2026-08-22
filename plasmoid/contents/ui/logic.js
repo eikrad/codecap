@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 eikrad <eikef.rades@protonmail.com>
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 .pragma library
 
 function expandPath(path, homeDir) {

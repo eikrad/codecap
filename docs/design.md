@@ -11,7 +11,9 @@ A Plasma 6 QML applet plus a Go session helper. Product name **codecap**. Domain
 
 ## Licence
 
+<!-- REUSE-IgnoreStart -->
 **GPL-2.0-or-later** (GNU GPL v2 or later) for plasmoid and helper. Stated with SPDX/REUSE headers (`SPDX-License-Identifier: GPL-2.0-or-later`) and `LICENSES/GPL-2.0-or-later.txt`, which is KDE’s current format — not a different licence from “GNU2+”. AUR `license=('GPL-2.0-or-later')` uses the same identifier.
+<!-- REUSE-IgnoreEnd -->
 
 ## Two artifacts
 

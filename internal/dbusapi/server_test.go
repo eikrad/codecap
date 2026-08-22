@@ -164,8 +164,8 @@ func TestGetSnapshotReadyIncludesAllowanceAndConsumedUsage(t *testing.T) {
 
 	usageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"five_hour": map[string]any{"utilization": 42.0, "resets_at": "2026-08-20T22:00:00Z"},
-			"seven_day": map[string]any{"utilization": 11.0, "resets_at": "2026-08-27T22:00:00Z"},
+			"five_hour":   map[string]any{"utilization": 42.0, "resets_at": "2026-08-20T22:00:00Z"},
+			"seven_day":   map[string]any{"utilization": 11.0, "resets_at": "2026-08-27T22:00:00Z"},
 			"extra_usage": map[string]any{"is_enabled": false},
 		})
 	}))

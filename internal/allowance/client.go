@@ -54,7 +54,7 @@ func (c *Client) FetchUsage(accessToken string) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("usage request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {

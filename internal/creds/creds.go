@@ -142,7 +142,7 @@ func refreshOAuth(httpClient *http.Client, tokenBaseURL, refreshToken string) (O
 	if err != nil {
 		return OAuth{}, fmt.Errorf("refresh token request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return OAuth{}, fmt.Errorf("%w: refresh rejected with status %d", ErrRefreshRejected, resp.StatusCode)
@@ -272,7 +272,7 @@ func lockCredentials(accountHome string) (func(), error) {
 	for {
 		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
-			_, _ = f.WriteString(fmt.Sprintf("%d\n", os.Getpid()))
+			_, _ = fmt.Fprintf(f, "%d\n", os.Getpid())
 			_ = f.Close()
 			return func() { _ = os.Remove(lockPath) }, nil
 		}

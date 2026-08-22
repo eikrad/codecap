@@ -15,7 +15,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("connect session bus: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	reply, err := conn.RequestName(dbusapi.ServiceName, dbus.NameFlagDoNotQueue)
 	if err != nil {

@@ -123,7 +123,7 @@ func consumeFile(path string, session, today, week, month period, loc *time.Loca
 	if err != nil {
 		return snapshot.ConsumedUsage{}, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	return consumeReader(file, session, today, week, month, loc, rates, seen)
 }

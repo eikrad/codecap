@@ -11,3 +11,9 @@ path = [".gitignore", "go.mod"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 eikrad <eikef.rades@protonmail.com>"
 SPDX-License-Identifier = "GPL-2.0-or-later"
+
+[[annotations]]
+path = ["go.sum", "plasmoid/metadata.json", "plasmoid/contents/config/main.xml", "contrib/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 eikrad <eikef.rades@protonmail.com>"
+SPDX-License-Identifier = "GPL-2.0-or-later"
