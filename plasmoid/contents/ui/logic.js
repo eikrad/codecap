@@ -7,7 +7,13 @@
 // "file:///home/you". The helper stats the string it is given, so a scheme has
 // to be gone before anything is joined to it.
 function stripFileScheme(value) {
-    var trimmed = (value || "").trim()
+    // QML hands this a url object, not a string. `value || ""` keeps the url
+    // (it is truthy) and url has no trim(), so coercing first is the whole
+    // point of this function existing.
+    if (value === undefined || value === null) {
+        return ""
+    }
+    var trimmed = String(value).trim()
     if (trimmed.indexOf("file://") !== 0) {
         return trimmed
     }

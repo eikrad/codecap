@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const logicPath = path.join(__dirname, "..", "contents", "ui", "logic.js");
+const logicPath = path.join(__dirname, "..", "..", "plasmoid", "contents", "ui", "logic.js");
 
 export function loadLogic() {
     const source = fs.readFileSync(logicPath, "utf8").replace(/^\.pragma library\s*\n/m, "");

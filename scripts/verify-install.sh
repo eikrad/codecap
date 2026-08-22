@@ -28,4 +28,14 @@ if ! grep -q 'Exec=/usr/bin/codecap' "$ROOT/usr/share/dbus-1/services/dev.codeca
 	exit 1
 fi
 
+# The package must contain only what a KPackage needs. `cp -a plasmoid/.` used
+# to ship the test suite into /usr/share.
+PLASMOID_ROOT="$ROOT/usr/share/plasma/plasmoids/dev.codecap.plasmoid"
+for unexpected in "$PLASMOID_ROOT/test" "$PLASMOID_ROOT/tests"; do
+	if [ -e "$unexpected" ]; then
+		echo "unexpected entry in the installed plasmoid: $unexpected" >&2
+		exit 1
+	fi
+done
+
 echo "install tree ok: $ROOT"

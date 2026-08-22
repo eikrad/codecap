@@ -26,7 +26,13 @@ QMLLINT_FLAGS := --import disable --type disable --property disable \
 
 QML_SOURCES := plasmoid/contents/ui/*.qml plasmoid/contents/config/*.qml
 
-.PHONY: build install install-all test test-plasmoid test-install \
+# qmltestrunner executes logic.js inside a real QML engine. The Node tests
+# cannot see that QML types are not JavaScript types, or that QML's
+# Number.toLocaleString has different defaults from ECMAScript's — both of
+# which shipped as bugs.
+QMLTESTRUNNER ?= $(shell command -v qmltestrunner 2>/dev/null || echo /usr/lib/qt6/bin/qmltestrunner)
+
+.PHONY: build install install-all test test-plasmoid test-plasmoid-qml test-install \
 	lint fmt-check lint-go lint-sh lint-qml ci clean
 
 build:
@@ -50,7 +56,11 @@ install:
 	install -d $(DESTDIR)$(SYSTEMDUSERDIR)
 	install -m 644 contrib/systemd/codecap.service $(DESTDIR)$(SYSTEMDUSERDIR)/codecap.service
 	install -d $(DESTDIR)$(PLASMOIDDIR)
-	cp -a plasmoid/. $(DESTDIR)$(PLASMOIDDIR)/
+	# Named explicitly. The tests live in tests/ rather than under plasmoid/
+	# so that kpackagetool6, which installs the whole directory, cannot ship
+	# them either; naming the contents here keeps that true by construction.
+	install -m 644 plasmoid/metadata.json $(DESTDIR)$(PLASMOIDDIR)/metadata.json
+	cp -a plasmoid/contents $(DESTDIR)$(PLASMOIDDIR)/
 
 fmt-check:
 	@unformatted="$$(gofmt -l .)"; \
@@ -77,7 +87,11 @@ test:
 	$(MAKE) test-plasmoid
 
 test-plasmoid:
-	node --test plasmoid/test/*.test.mjs
+	node --test tests/plasmoid/*.test.mjs
+	$(MAKE) test-plasmoid-qml
+
+test-plasmoid-qml:
+	QT_QPA_PLATFORM=offscreen $(QMLTESTRUNNER) -input tests/plasmoid/qml
 
 install-all: build install
 
