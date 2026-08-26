@@ -57,6 +57,19 @@ jobs:
         run: make test-install
 
       - name: Vulnerability scan
+        # govulncheck is a tool, not a build dependency, so it may use a newer
+        # toolchain than the module targets. actions/setup-go pins
+        # GOTOOLCHAIN=local to the go.mod version, and x/vuln has required Go
+        # 1.25 since v1.2.0 — so when go.mod trailed far enough behind, the scan
+        # stopped running at all rather than reporting anything. GOTOOLCHAIN=auto
+        # lets `go run` fetch what the tool asks for and keeps that failure mode
+        # from coming back; every other step still builds on the go.mod version.
+        #
+        # Note this does not decide what gets scanned. govulncheck reports the
+        # standard library of the toolchain the module builds with, so a stale
+        # `go` directive shows up here as real findings, not as a tooling error.
+        env:
+          GOTOOLCHAIN: auto
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   plasmoid:
