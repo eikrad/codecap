@@ -132,6 +132,42 @@ func TestGetSnapshotFillsAllowanceWhenVendorFetchSucceeds(t *testing.T) {
 	if snap.UsageCredit != "enabled" {
 		t.Fatalf("usage credit: %q", snap.UsageCredit)
 	}
+	// The amounts have to survive the whole path, not just the mapping: vendor
+	// reply, Result, SnapshotFields, applyAllowance, and the JSON on the bus.
+	// The widget showed a bare status word because nothing carried these.
+	if snap.UsageCreditSpend.UsedUSD != 5.0 || snap.UsageCreditSpend.LimitUSD != 100.0 {
+		t.Fatalf("usage credit spend: %+v", snap.UsageCreditSpend)
+	}
+}
+
+// The plasmoid reads the reply as JSON, so a field that never gets serialised
+// is invisible to it no matter what the Go struct holds.
+func TestGetSnapshotJSONCarriesUsageCreditSpend(t *testing.T) {
+	snap := snapshot.Snapshot{
+		SchemaVersion: snapshot.SchemaVersion,
+		Face:          snapshot.FaceReady,
+		UsageCredit:   "exhausted",
+		UsageCreditSpend: snapshot.UsageCreditSpend{
+			UsedUSD:  4.04,
+			LimitUSD: 4.00,
+		},
+	}
+	encoded, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatalf("marshal snapshot: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal snapshot: %v", err)
+	}
+	spend, ok := decoded["usage_credit_spend"].(map[string]any)
+	if !ok {
+		t.Fatalf("usage_credit_spend missing from the bus payload: %s", encoded)
+	}
+	if spend["used_usd"] != 4.04 || spend["limit_usd"] != 4.00 {
+		t.Fatalf("usage_credit_spend = %+v, want 4.04 of 4.00", spend)
+	}
 }
 
 func TestGetSnapshotSignedOutWhenRefreshRejected(t *testing.T) {

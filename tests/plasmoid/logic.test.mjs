@@ -273,3 +273,28 @@ test("describePayload names the shape for the log line", () => {
     assert.equal(Logic.describePayload({ value: 1, other: 2 }), "object{value,other}");
     assert.ok(Logic.describePayload("hello").startsWith("string hello"));
 });
+
+// Usage Credit is money, not a traffic light. The vendor shows "$4.04 of $4.00"
+// for the Account Home that prompted this; the widget showed only "exhausted".
+test("normalizeUsageCreditSpend carries the amounts through", () => {
+    const snap = Logic.parseSnapshot(JSON.stringify({
+        face: "ready",
+        usage_credit: "exhausted",
+        usage_credit_spend: { used_usd: 4.04, limit_usd: 4.0 }
+    }));
+    assert.equal(snap.usage_credit_spend.used_usd, 4.04);
+    assert.equal(snap.usage_credit_spend.limit_usd, 4.0);
+});
+
+// The helper and the plasmoid are installed and versioned separately, so the
+// field may simply not be there.
+test("normalizeUsageCreditSpend survives a helper that does not send it", () => {
+    const snap = Logic.parseSnapshot(JSON.stringify({ face: "ready", usage_credit: "enabled" }));
+    assert.deepEqual(snap.usage_credit_spend, { used_usd: 0, limit_usd: 0 });
+
+    for (const junk of [null, "4.04", [], { used_usd: "x", limit_usd: NaN }]) {
+        const s = Logic.parseSnapshot(JSON.stringify({ usage_credit_spend: junk }));
+        assert.equal(s.usage_credit_spend.used_usd, 0);
+        assert.equal(s.usage_credit_spend.limit_usd, 0);
+    }
+});

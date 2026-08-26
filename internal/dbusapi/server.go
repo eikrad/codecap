@@ -281,6 +281,7 @@ func applyAllowance(snap *snapshot.Snapshot, fields allowance.SnapshotFields) {
 	if fields.UsageCredit != "" {
 		snap.UsageCredit = fields.UsageCredit
 	}
+	snap.UsageCreditSpend = fields.UsageCreditSpend
 	if fields.FetchedAt != 0 {
 		snap.FetchedAt = fields.FetchedAt
 	}

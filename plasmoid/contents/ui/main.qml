@@ -247,7 +247,25 @@ PlasmoidItem {
         return ""
     }
 
+    // Usage Credit is money, so it is reported as money: the vendor's own view
+    // says "$4.04 of $4.00", and the status word alone could not say how much
+    // was left or how far past the ceiling the Account had gone.
+    //
+    // Deliberately not converted to Display Currency. That is scoped to List
+    // Price, which is an estimate; this is what the vendor actually bills, and
+    // an ECB conversion would print a figure nobody is charged.
     function usageCreditLabel() {
+        if (snapshot.usage_credit === "none") {
+            return ""
+        }
+        var spend = snapshot.usage_credit_spend
+        if (spend && spend.limit_usd > 0) {
+            return i18n("Usage credit: %1 of %2",
+                        Logic.formatMoney(spend.used_usd, 1.0, "USD", true, Qt.locale()),
+                        Logic.formatMoney(spend.limit_usd, 1.0, "USD", true, Qt.locale()))
+        }
+        // A helper too old to send the amounts, or a limit the vendor did not
+        // report. The status word is less useful, but it is not wrong.
         switch (snapshot.usage_credit) {
         case "enabled":
             return i18n("Usage credit enabled")

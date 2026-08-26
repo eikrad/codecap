@@ -50,6 +50,7 @@ function emptySnapshot() {
         session_allowance: { used_percent: 0, resets_at: 0, stale: false },
         weekly_allowance: { used_percent: 0, resets_at: 0, stale: false },
         usage_credit: "none",
+        usage_credit_spend: { used_usd: 0, limit_usd: 0 },
         consumed_usage: {
             session: { list_price_usd: 0, tokens: 0 },
             today: { list_price_usd: 0, tokens: 0 },
@@ -73,6 +74,18 @@ function normalizeWindow(value) {
         used_percent: finiteNumber(value.used_percent),
         resets_at: finiteNumber(value.resets_at),
         stale: !!value.stale
+    }
+}
+
+// An older helper sends no usage_credit_spend at all, so this has to survive the
+// field being absent rather than assume the two are upgraded together.
+function normalizeUsageCreditSpend(value) {
+    if (!value || typeof value !== "object") {
+        return { used_usd: 0, limit_usd: 0 }
+    }
+    return {
+        used_usd: finiteNumber(value.used_usd),
+        limit_usd: finiteNumber(value.limit_usd)
     }
 }
 
@@ -122,6 +135,7 @@ function normalizeSnapshot(decoded) {
     base.degraded = normalizeDegraded(decoded.degraded)
     base.session_allowance = normalizeWindow(decoded.session_allowance)
     base.weekly_allowance = normalizeWindow(decoded.weekly_allowance)
+    base.usage_credit_spend = normalizeUsageCreditSpend(decoded.usage_credit_spend)
 
     var consumed = decoded.consumed_usage
     if (!consumed || typeof consumed !== "object") {
