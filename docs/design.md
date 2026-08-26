@@ -88,7 +88,9 @@ Frozen 2026-08-20. Chrome only. Compact **content** (Session used % + time to re
 
 **Compact tooltip** (hover): `Session {used%} · {time to reset}`. If Last-Known: `Last-Known` on that line. Mute the ring (`disabledTextColor`); no extra overlay icon. Weekly %, List Price, tokens, and Account Home stay out of the tooltip — those are the click popup.
 
-**Colour:** Plasma theme only (`Kirigami.Theme` / `PlasmaCore.Theme`). Ring fill is the desktop accent (`highlightColor`). **≥80% used** → `neutralTextColor`. **100% used or Usage Credit** → `negativeTextColor`. Stale uses `disabledTextColor`. Same bands on expanded Session / Weekly bars. Thresholds are not settings in v1. No per-widget colour picker; look follows System Settings → Appearance.
+**Colour:** Plasma theme only (`Kirigami.Theme` / `PlasmaCore.Theme`). Ring fill is the desktop accent (`highlightColor`). **≥80% used** → `neutralTextColor`. **100% used** → `negativeTextColor`. Stale uses `disabledTextColor`. Same bands on expanded Session / Weekly bars. Thresholds are not settings in v1. No per-widget colour picker; look follows System Settings → Appearance.
+
+> **Visual revision 2026-08-26 — D3, decided: Usage Credit does not colour the ring.** Was: "100% used **or Usage Credit** → `negativeTextColor`". A fill's colour now reports only the fill it sits on. Usage Credit is a monthly state on a different clock from the Allowance Window the ring draws, so an exhausted credit painted a Session at 37% as if it were spent — the compact face's one job is reporting the Session, and that was the part it got wrong. Usage Credit keeps its status line in the expanded view, which is where `CONTEXT.md` already puts it.
 
 **Expanded** (click popup; also the desktop face): no second ring. Session Allowance and Weekly Allowance are **horizontal bars** with `%` and time-to-reset under each label, same colour bands as the compact ring. Usage Credit is a status line, not a third bar. Consumed Usage is a `Kirigami.FormLayout` (session / today / week / month; List Price then tokens). Account label at the top. Breeze spacing; no custom brand cards.
 

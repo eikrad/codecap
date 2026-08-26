@@ -61,7 +61,8 @@ QMLTESTRUNNER ?= $(shell command -v qmltestrunner6 2>/dev/null \
 	|| command -v qmltestrunner 2>/dev/null \
 	|| echo /usr/lib/qt6/bin/qmltestrunner)
 
-.PHONY: build install install-all test test-plasmoid test-plasmoid-qml test-install \
+.PHONY: build install install-all test test-plasmoid test-plasmoid-qml \
+	test-plasmoid-qml-plasma test-install \
 	lint fmt-check lint-go lint-sh lint-qml ci clean
 
 build:
@@ -128,6 +129,18 @@ test-plasmoid:
 
 test-plasmoid-qml:
 	QT_QPA_PLATFORM=offscreen $(QMLTESTRUNNER) -input tests/plasmoid/qml
+	$(MAKE) test-plasmoid-qml-plasma
+
+# These load the applet's own components, so they need Kirigami. CI installs the
+# Qt QML modules only, and pulling KDE into it to run two colour assertions is a
+# bad trade — so this skips itself rather than failing there, and runs for real
+# on any machine that can actually display the widget.
+test-plasmoid-qml-plasma:
+	@if QT_QPA_PLATFORM=offscreen $(QMLTESTRUNNER) -input tests/plasmoid/qml-plasma 2>&1 | grep -q "module \"org.kde.kirigami\" is not installed"; then \
+		echo "skipping tests/plasmoid/qml-plasma: Kirigami not installed"; \
+	else \
+		QT_QPA_PLATFORM=offscreen $(QMLTESTRUNNER) -input tests/plasmoid/qml-plasma; \
+	fi
 
 install-all: build install
 

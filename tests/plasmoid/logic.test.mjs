@@ -130,17 +130,23 @@ test("formatTimeToReset omits elapsed or missing reset times", () => {
     assert.equal(Logic.formatTimeToReset(1300, 1000), "5m");
 });
 
-test("allowanceFillColor maps utilization stale and usage credit states", () => {
-    assert.equal(Logic.allowanceFillColor(10, true, "none", colors), "gray");
-    assert.equal(Logic.allowanceFillColor(100, false, "none", colors), "red");
-    assert.equal(Logic.allowanceFillColor(100, false, "exhausted", colors), "red");
-    assert.equal(Logic.allowanceFillColor(85, false, "enabled", colors), "orange");
-    assert.equal(Logic.allowanceFillColor(20, false, "enabled", colors), "blue");
-    // Band edges. Whether Usage Credit alone colours the ring is decision D3 in
-    // docs/plan-hardening.md; these pin only what is settled today.
-    assert.equal(Logic.allowanceFillColor(80, false, "none", colors), "orange");
-    assert.equal(Logic.allowanceFillColor(79.9, false, "none", colors), "blue");
-    assert.equal(Logic.allowanceFillColor(100, true, "exhausted", colors), "gray");
+test("allowanceFillColor maps utilization and stale states", () => {
+    assert.equal(Logic.allowanceFillColor(10, true, colors), "gray");
+    assert.equal(Logic.allowanceFillColor(100, false, colors), "red");
+    assert.equal(Logic.allowanceFillColor(85, false, colors), "orange");
+    assert.equal(Logic.allowanceFillColor(20, false, colors), "blue");
+    // Band edges.
+    assert.equal(Logic.allowanceFillColor(80, false, colors), "orange");
+    assert.equal(Logic.allowanceFillColor(79.9, false, colors), "blue");
+    assert.equal(Logic.allowanceFillColor(100, true, colors), "gray");
+});
+
+// The reported bug: exhausted Usage Credit painted a Session at 37% red, so the
+// ring reported a monthly overage state instead of the window it draws. Usage
+// Credit is no longer a parameter, so the signature is what pins this; the case
+// is kept because it is the number that was actually on screen.
+test("allowanceFillColor colours a mid-band Session by its own fill", () => {
+    assert.equal(Logic.allowanceFillColor(37, false, colors), "blue");
 });
 
 test("effectiveCurrency prefers config override then locale mapping", () => {

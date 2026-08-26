@@ -234,14 +234,17 @@ function formatTimeToReset(resetsAtUnix, nowUnix) {
     return minutes + "m"
 }
 
-function allowanceFillColor(usedPercent, stale, usageCredit, colors) {
+// Colour reports the fill it sits on and nothing else: the ring is the Session
+// Allowance, and the expanded bars are Session and Weekly. Usage Credit is a
+// separate, monthly thing — letting "exhausted" force red painted a Session at
+// 37% as if it were spent, which is the opposite of what the ring is for. It
+// stays a label in the expanded view. Visual revision 2026-08-26, see
+// design.md; this closes D3 in docs/plan-hardening.md.
+function allowanceFillColor(usedPercent, stale, colors) {
     if (stale) {
         return colors.disabled
     }
-    if (usedPercent >= 100 || usageCredit === "exhausted") {
-        return colors.negative
-    }
-    if (usageCredit !== "none" && usedPercent >= 100) {
+    if (usedPercent >= 100) {
         return colors.negative
     }
     if (usedPercent >= 80) {

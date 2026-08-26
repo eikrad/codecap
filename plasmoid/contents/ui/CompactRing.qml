@@ -13,7 +13,6 @@ Item {
     property bool isBound: false
     property real usedPercent: 0
     property bool stale: false
-    property string usageCredit: "none"
     property bool showNumeral: true
 
     implicitWidth: Kirigami.Units.gridUnit * 2
@@ -25,7 +24,6 @@ Item {
     readonly property color ringColor: Logic.allowanceFillColor(
         usedPercent,
         stale,
-        usageCredit,
         {
             highlight: Kirigami.Theme.highlightColor,
             neutral: Kirigami.Theme.neutralTextColor,

@@ -347,7 +347,6 @@ PlasmoidItem {
             isBound: root.isBound
             usedPercent: root.snapshot.session_allowance.used_percent
             stale: root.snapshot.session_allowance.stale
-            usageCredit: root.snapshot.usage_credit
             showNumeral: compactRoot.width >= Kirigami.Units.gridUnit * 2.5
         }
     }
@@ -413,7 +412,6 @@ PlasmoidItem {
                 usedPercent: root.snapshot.session_allowance.used_percent
                 resetsAt: root.snapshot.session_allowance.resets_at
                 stale: root.snapshot.session_allowance.stale
-                usageCredit: root.snapshot.usage_credit
                 nowUnix: root.nowUnix
             }
 
@@ -424,7 +422,6 @@ PlasmoidItem {
                 usedPercent: root.snapshot.weekly_allowance.used_percent
                 resetsAt: root.snapshot.weekly_allowance.resets_at
                 stale: root.snapshot.weekly_allowance.stale
-                usageCredit: root.snapshot.usage_credit
                 nowUnix: root.nowUnix
             }
 
