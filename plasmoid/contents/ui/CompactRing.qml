@@ -78,12 +78,10 @@ Item {
         }
 
         onPercentChanged: requestPaint()
+        onVisibleChanged: if (visible) requestPaint()
         Connections {
-            target: Kirigami.Theme
-            function onHighlightColorChanged() { canvas.requestPaint() }
-            function onNeutralTextColorChanged() { canvas.requestPaint() }
-            function onNegativeTextColorChanged() { canvas.requestPaint() }
-            function onDisabledTextColorChanged() { canvas.requestPaint() }
+            target: root
+            function onRingColorChanged() { canvas.requestPaint() }
         }
         Component.onCompleted: requestPaint()
     }
