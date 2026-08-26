@@ -4,8 +4,12 @@
 package allowance
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/eikrad/codecap/internal/snapshot"
 )
 
 func TestFromUsagePayloadMapsSessionWeeklyAndUsageCredit(t *testing.T) {
@@ -105,5 +109,97 @@ func TestFromUsagePayloadMapsNullBucketsToEmptyWindows(t *testing.T) {
 func TestFromUsagePayloadRejectsInvalidJSON(t *testing.T) {
 	if _, err := FromUsagePayload([]byte(`not-json`)); err == nil {
 		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+// The Account Home behind the reported bug: the vendor UI showed
+// "Usage credits $4.04 of $4.00", the widget showed only the word "exhausted".
+// 4.04 of 4.00 is 101%, so the status was right all along — what was missing
+// were the amounts it was derived from.
+func TestUsageCreditSpendKeepsTheAmounts(t *testing.T) {
+	cases := []struct {
+		name      string
+		json      string
+		wantUsed  float64
+		wantLimit float64
+	}{
+		{
+			name:      "over the ceiling",
+			json:      `{"extra_usage":{"is_enabled":true,"monthly_limit":4.00,"used_credits":4.04}}`,
+			wantUsed:  4.04,
+			wantLimit: 4.00,
+		},
+		{
+			name:      "part way through",
+			json:      `{"extra_usage":{"is_enabled":true,"monthly_limit":20,"used_credits":5.5}}`,
+			wantUsed:  5.5,
+			wantLimit: 20,
+		},
+		{
+			// A ceiling that is not in force must not be reported as headroom.
+			name:      "disabled reports nothing",
+			json:      `{"extra_usage":{"is_enabled":false,"monthly_limit":20,"used_credits":5}}`,
+			wantUsed:  0,
+			wantLimit: 0,
+		},
+		{
+			name:      "absent block",
+			json:      `{"five_hour":null}`,
+			wantUsed:  0,
+			wantLimit: 0,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := FromUsagePayload([]byte(tc.json))
+			if err != nil {
+				t.Fatalf("FromUsagePayload: %v", err)
+			}
+			if got.UsageCreditSpend.UsedUSD != tc.wantUsed {
+				t.Errorf("used = %v, want %v", got.UsageCreditSpend.UsedUSD, tc.wantUsed)
+			}
+			if got.UsageCreditSpend.LimitUSD != tc.wantLimit {
+				t.Errorf("limit = %v, want %v", got.UsageCreditSpend.LimitUSD, tc.wantLimit)
+			}
+		})
+	}
+}
+
+// The reason the amounts were added as a field instead of reshaping
+// UsageCredit: a cache written by an older helper has to keep working, or an
+// offline desktop drops from Last-Known to Unknown Allowance on upgrade.
+func TestLastKnownReadsACachePredatingUsageCreditSpend(t *testing.T) {
+	dir := t.TempDir()
+	store := NewLastKnownStore(dir)
+	accountHome := "/home/someone/.claude"
+
+	old := `{
+		"account_home": "` + accountHome + `",
+		"fetched_at": 1787756882,
+		"session_allowance": {"used_percent": 37, "resets_at": 1787771400, "stale": false},
+		"weekly_allowance": {"used_percent": 48, "resets_at": 1788156000, "stale": false},
+		"usage_credit": "exhausted"
+	}`
+	path := store.pathFor(accountHome)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+		t.Fatalf("write legacy cache: %v", err)
+	}
+
+	cached, ok, err := store.Load(accountHome, time.Unix(1787756900, 0).UTC())
+	if err != nil {
+		t.Fatalf("Load on a pre-upgrade cache: %v", err)
+	}
+	if !ok {
+		t.Fatal("pre-upgrade cache was discarded; offline would fall back to Unknown Allowance")
+	}
+	if cached.UsageCredit != "exhausted" {
+		t.Errorf("usage credit = %q, want %q", cached.UsageCredit, "exhausted")
+	}
+	if cached.UsageCreditSpend != (snapshot.UsageCreditSpend{}) {
+		t.Errorf("missing amounts should read as zero, got %+v", cached.UsageCreditSpend)
 	}
 }

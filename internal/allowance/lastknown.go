@@ -34,6 +34,10 @@ type CachedAllowance struct {
 	Session     snapshot.AllowanceWindow `json:"session_allowance"`
 	Weekly      snapshot.AllowanceWindow `json:"weekly_allowance"`
 	UsageCredit string                   `json:"usage_credit"`
+	// Absent in caches written before this field existed, which decode to the
+	// zero value rather than failing — that is why it was added instead of
+	// reshaping UsageCredit.
+	UsageCreditSpend snapshot.UsageCreditSpend `json:"usage_credit_spend"`
 }
 
 // LastKnownStore reads and writes Last-Known Allowance under a cache root

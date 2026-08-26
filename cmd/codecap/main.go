@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/eikrad/codecap/internal/dbusapi"
@@ -17,6 +18,22 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// No flag package: the helper takes no options, and a subcommand that only
+	// exists for inspecting the vendor payload should not turn the daemon's
+	// entry point into a CLI. Bare `codecap` stays the helper, exactly as the
+	// systemd unit and the D-Bus service file invoke it.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "dump-usage":
+			if err := dumpUsage(ctx, os.Stdout, strings.Join(os.Args[2:], " ")); err != nil {
+				log.Fatalf("dump-usage: %v", err)
+			}
+			return
+		default:
+			log.Fatalf("unknown subcommand %q (try: dump-usage <account-home>)", os.Args[1])
+		}
+	}
 
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {

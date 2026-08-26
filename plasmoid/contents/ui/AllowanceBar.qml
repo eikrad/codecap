@@ -14,7 +14,6 @@ Item {
     property real usedPercent: 0
     property int resetsAt: 0
     property bool stale: false
-    property string usageCredit: "none"
     property int nowUnix: Math.floor(Date.now() / 1000)
 
     implicitHeight: column.implicitHeight
@@ -22,7 +21,6 @@ Item {
     readonly property color fillColor: Logic.allowanceFillColor(
         usedPercent,
         stale,
-        usageCredit,
         {
             highlight: Kirigami.Theme.highlightColor,
             neutral: Kirigami.Theme.neutralTextColor,

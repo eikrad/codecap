@@ -64,9 +64,25 @@ func NewClient(httpClient *http.Client, apiBaseURL string) *Client {
 }
 
 func (c *Client) FetchUsage(ctx context.Context, accessToken string) (Result, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiBaseURL+usagePath, nil)
+	body, err := c.FetchRawUsage(ctx, accessToken)
 	if err != nil {
 		return Result{}, err
+	}
+	return FromUsagePayload(body)
+}
+
+// FetchRawUsage returns the endpoint's JSON body without interpreting it.
+//
+// It exists because the mapping below can only be checked against a payload
+// nobody has looked at: the endpoint is undocumented, every fixture in this
+// package is invented, and a field the mapping does not read is invisible.
+// `codecap dump-usage` is the caller. Sharing this with FetchUsage keeps the
+// 401/403/429 handling in one place, which is the part that must not be
+// reimplemented casually — see the comment on userAgent.
+func (c *Client) FetchRawUsage(ctx context.Context, accessToken string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiBaseURL+usagePath, nil)
+	if err != nil {
+		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("anthropic-beta", betaHeader)
@@ -75,31 +91,31 @@ func (c *Client) FetchUsage(ctx context.Context, accessToken string) (Result, er
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return Result{}, fmt.Errorf("usage request: %w", err)
+		return nil, fmt.Errorf("usage request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return Result{}, fmt.Errorf("read usage response: %w", err)
+		return nil, fmt.Errorf("read usage response: %w", err)
 	}
 
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized:
-		return Result{}, fmt.Errorf("%w: status %d", errUnauthorized, resp.StatusCode)
+		return nil, fmt.Errorf("%w: status %d", errUnauthorized, resp.StatusCode)
 	case resp.StatusCode == http.StatusForbidden,
 		resp.StatusCode == http.StatusTooManyRequests,
 		resp.StatusCode >= 500:
 		// 403 used to be treated as "token is bad", which forced a refresh on
 		// every poll tick against an endpoint that was rate-limiting us.
-		return Result{}, &TransientError{
+		return nil, &TransientError{
 			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")),
 			err:        fmt.Errorf("%w: status %d", errTransient, resp.StatusCode),
 		}
 	case resp.StatusCode < 200 || resp.StatusCode >= 300:
-		return Result{}, fmt.Errorf("usage status %d: %s", resp.StatusCode, truncate(body))
+		return nil, fmt.Errorf("usage status %d: %s", resp.StatusCode, truncate(body))
 	}
-	return FromUsagePayload(body)
+	return body, nil
 }
 
 func IsUnauthorized(err error) bool {

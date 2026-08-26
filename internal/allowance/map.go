@@ -13,9 +13,10 @@ import (
 
 // Result is vendor Allowance mapped into snapshot fields.
 type Result struct {
-	Session     snapshot.AllowanceWindow
-	Weekly      snapshot.AllowanceWindow
-	UsageCredit string
+	Session          snapshot.AllowanceWindow
+	Weekly           snapshot.AllowanceWindow
+	UsageCredit      string
+	UsageCreditSpend snapshot.UsageCreditSpend
 }
 
 type usageBucket struct {
@@ -44,10 +45,33 @@ func FromUsagePayload(data []byte) (Result, error) {
 	}
 
 	return Result{
-		Session:     mapBucket(payload.FiveHour),
-		Weekly:      mapBucket(payload.SevenDay),
-		UsageCredit: mapUsageCredit(payload.ExtraUsage),
+		Session:          mapBucket(payload.FiveHour),
+		Weekly:           mapBucket(payload.SevenDay),
+		UsageCredit:      mapUsageCredit(payload.ExtraUsage),
+		UsageCreditSpend: mapUsageCreditSpend(payload.ExtraUsage),
 	}, nil
+}
+
+// mapUsageCreditSpend keeps the amounts the status is derived from. The widget
+// showed "Usage credit exhausted" where the vendor shows "$4.04 of $4.00" — the
+// same fact, but the word alone cannot say how much is left or how far over the
+// ceiling the Account is.
+//
+// Disabled credit reports zeroes rather than the vendor's ceiling: a limit that
+// is not in force is not a limit, and printing one would suggest headroom that
+// does not exist.
+func mapUsageCreditSpend(extra *extraUsage) snapshot.UsageCreditSpend {
+	if extra == nil || extra.IsEnabled == nil || !*extra.IsEnabled {
+		return snapshot.UsageCreditSpend{}
+	}
+	spend := snapshot.UsageCreditSpend{}
+	if extra.UsedCredits != nil {
+		spend.UsedUSD = *extra.UsedCredits
+	}
+	if extra.MonthlyLimit != nil {
+		spend.LimitUSD = *extra.MonthlyLimit
+	}
+	return spend
 }
 
 func mapBucket(bucket *usageBucket) snapshot.AllowanceWindow {

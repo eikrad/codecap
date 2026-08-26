@@ -50,6 +50,7 @@ function emptySnapshot() {
         session_allowance: { used_percent: 0, resets_at: 0, stale: false },
         weekly_allowance: { used_percent: 0, resets_at: 0, stale: false },
         usage_credit: "none",
+        usage_credit_spend: { used_usd: 0, limit_usd: 0 },
         consumed_usage: {
             session: { list_price_usd: 0, tokens: 0 },
             today: { list_price_usd: 0, tokens: 0 },
@@ -73,6 +74,18 @@ function normalizeWindow(value) {
         used_percent: finiteNumber(value.used_percent),
         resets_at: finiteNumber(value.resets_at),
         stale: !!value.stale
+    }
+}
+
+// An older helper sends no usage_credit_spend at all, so this has to survive the
+// field being absent rather than assume the two are upgraded together.
+function normalizeUsageCreditSpend(value) {
+    if (!value || typeof value !== "object") {
+        return { used_usd: 0, limit_usd: 0 }
+    }
+    return {
+        used_usd: finiteNumber(value.used_usd),
+        limit_usd: finiteNumber(value.limit_usd)
     }
 }
 
@@ -122,6 +135,7 @@ function normalizeSnapshot(decoded) {
     base.degraded = normalizeDegraded(decoded.degraded)
     base.session_allowance = normalizeWindow(decoded.session_allowance)
     base.weekly_allowance = normalizeWindow(decoded.weekly_allowance)
+    base.usage_credit_spend = normalizeUsageCreditSpend(decoded.usage_credit_spend)
 
     var consumed = decoded.consumed_usage
     if (!consumed || typeof consumed !== "object") {
@@ -234,14 +248,17 @@ function formatTimeToReset(resetsAtUnix, nowUnix) {
     return minutes + "m"
 }
 
-function allowanceFillColor(usedPercent, stale, usageCredit, colors) {
+// Colour reports the fill it sits on and nothing else: the ring is the Session
+// Allowance, and the expanded bars are Session and Weekly. Usage Credit is a
+// separate, monthly thing — letting "exhausted" force red painted a Session at
+// 37% as if it were spent, which is the opposite of what the ring is for. It
+// stays a label in the expanded view. Visual revision 2026-08-26, see
+// design.md; this closes D3 in docs/plan-hardening.md.
+function allowanceFillColor(usedPercent, stale, colors) {
     if (stale) {
         return colors.disabled
     }
-    if (usedPercent >= 100 || usageCredit === "exhausted") {
-        return colors.negative
-    }
-    if (usageCredit !== "none" && usedPercent >= 100) {
+    if (usedPercent >= 100) {
         return colors.negative
     }
     if (usedPercent >= 80) {

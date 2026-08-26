@@ -318,12 +318,13 @@ peer. Three options —
 *Recommendation:* 2 now (it is Phase 2 work regardless), 1 when a second Account Home
 becomes a real use case. **Blocks 2.2.**
 
-### D3 · Does Usage Credit colour the ring?
-`design.md:81` reads "**100% used or Usage Credit** → `negativeTextColor`".
-`logic.js:105-110` implements only the first half — the second condition is dead code
-strictly subsumed by the first, which suggests the intent was `usageCredit !== "none"`.
-`logic.test.mjs:65` locks in the current behaviour. The visual spec is frozen; this is
-yours to read. **Blocks 6.1's test updates.**
+### D3 · Does Usage Credit colour the ring? — **decided 2026-08-26: no**
+Resolved against the reading the audit suspected. The `usageCredit !== "none"` intent was
+tried, shipped as `usageCredit === "exhausted"`, and was wrong in use: an exhausted monthly
+credit painted a Session at 37% red, so the ring stopped reporting the window it draws.
+Colour now depends on `usedPercent` and `stale` only, and `allowanceFillColor` no longer
+takes a Usage Credit argument at all. Usage Credit stays a status line in the expanded
+view. See the visual revision line at `design.md:92`.
 
 ### D4 · Em dash or question icon for Unknown Allowance
 `CONTEXT.md:72` says "Compact shows an em dash"; `design.md:77`, frozen a day later, says

@@ -21,11 +21,46 @@ import (
 
 const sessionWindow = 5 * time.Hour
 
+// cacheCreation splits a cache write by the lifetime it was written with. The
+// two are priced differently — a one-hour entry costs more to write than a
+// five-minute one — so the split has to survive as far as the rate card.
+type cacheCreation struct {
+	Ephemeral1hInputTokens int64 `json:"ephemeral_1h_input_tokens"`
+	Ephemeral5mInputTokens int64 `json:"ephemeral_5m_input_tokens"`
+}
+
 type tokenUsage struct {
-	InputTokens              int64 `json:"input_tokens"`
-	OutputTokens             int64 `json:"output_tokens"`
-	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+	// CacheCreationInputTokens is the total, and CacheCreation is that same
+	// total split by lifetime. Across 3761 events in three Account Homes the
+	// two always agreed, so the total is treated as authoritative for token
+	// reporting and the split is used only to price it.
+	CacheCreationInputTokens int64          `json:"cache_creation_input_tokens"`
+	CacheCreation            *cacheCreation `json:"cache_creation"`
+	CacheReadInputTokens     int64          `json:"cache_read_input_tokens"`
+}
+
+// cacheWriteSplit reports one-hour and five-minute cache writes separately.
+//
+// The pointer is nil for an event written by a Claude Code old enough not to
+// report the split. Everything then falls into the five-minute bucket, which is
+// what this code assumed before the split existed — a low estimate for anyone
+// actually using one-hour caching, but the alternative is inventing a lifetime
+// the log does not record.
+func (u tokenUsage) cacheWriteSplit() (oneHour, fiveMinute int64) {
+	if u.CacheCreation == nil {
+		return 0, u.CacheCreationInputTokens
+	}
+	oneHour = u.CacheCreation.Ephemeral1hInputTokens
+	fiveMinute = u.CacheCreation.Ephemeral5mInputTokens
+	// A total that disagrees with its own split means the payload changed shape.
+	// Trusting the total keeps the token count right and puts the unexplained
+	// remainder in the cheaper bucket rather than silently dropping it.
+	if remainder := u.CacheCreationInputTokens - (oneHour + fiveMinute); remainder > 0 {
+		fiveMinute += remainder
+	}
+	return oneHour, fiveMinute
 }
 
 type usageEvent struct {
@@ -204,9 +239,11 @@ func parseEventsFrom(reader io.Reader, rates Rates, cutoff time.Time) ([]event, 
 
 func estimateListPriceUSD(rates Rates, model string, usage tokenUsage) float64 {
 	card := rates.forModel(model)
+	oneHourWrite, fiveMinuteWrite := usage.cacheWriteSplit()
 	return (float64(usage.InputTokens)/1_000_000.0)*card.InputUSDPerM +
 		(float64(usage.OutputTokens)/1_000_000.0)*card.OutputUSDPerM +
-		(float64(usage.CacheCreationInputTokens)/1_000_000.0)*card.CacheWriteUSDPerM +
+		(float64(oneHourWrite)/1_000_000.0)*card.CacheWrite1hUSDPerM +
+		(float64(fiveMinuteWrite)/1_000_000.0)*card.CacheWrite5mUSDPerM +
 		(float64(usage.CacheReadInputTokens)/1_000_000.0)*card.CacheReadUSDPerM
 }
 

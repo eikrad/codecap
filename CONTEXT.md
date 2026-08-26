@@ -55,8 +55,10 @@ Claude's seven-day Allowance Window. In the expanded view it sits under Session 
 _Avoid_: weekly (unqualified), weekly limit, Seven-Day Allowance
 
 **Usage Credit**:
-Optional paid overage after Allowance is exhausted. A status on the widget (enabled / available / exhausted), not a third bar.
+Optional paid overage after Allowance is exhausted. A monthly ceiling in money that the Account holder sets: once any Allowance Window is exhausted, work continues against Usage Credit until the ceiling is reached. Shown on the widget as amount spent of ceiling, on one status line — still not a third bar. Amounts stay in USD as the vendor reports them; Display Currency is scoped to List Price.
 _Avoid_: extra usage, overage (as the primary name)
+
+> **Glossary revision 2026-08-26.** Was: "A status on the widget (enabled / available / exhausted), not a third bar." The status word was the whole of it, and it could not say how much was left — the widget said "Usage credit exhausted" where the vendor said "$4.04 of $4.00". Amounts were already fetched and thrown away in `mapUsageCredit`. The enabled / available / exhausted status is kept internally, because a ceiling of 0 with credit enabled and one with credit disabled have identical amounts, and only the status separates them.
 
 ### Faces
 

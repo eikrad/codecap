@@ -36,6 +36,25 @@ type AllowanceWindow struct {
 	Stale       bool    `json:"stale"`
 }
 
+// UsageCreditSpend is the money side of Usage Credit: what the vendor says has
+// been spent against the ceiling the Account holder set.
+//
+// It sits next to the UsageCredit status rather than replacing it, because the
+// status carries one thing the amounts cannot: a limit of 0 with credit
+// disabled and a limit of 0 with credit enabled are different states, and both
+// have the same amounts. Adding fields also keeps Last-Known caches written by
+// an older helper readable — a changed shape would make LastKnownStore.Load
+// fail, and an offline desktop would fall back to Unknown Allowance instead of
+// showing what it knows.
+//
+// Amounts stay in USD. CONTEXT.md scopes Display Currency to List Price, which
+// is an estimate; this is real money the vendor bills, and converting it at an
+// ECB rate would print a number nobody is charged.
+type UsageCreditSpend struct {
+	UsedUSD  float64 `json:"used_usd"`
+	LimitUSD float64 `json:"limit_usd"`
+}
+
 type ConsumedPeriod struct {
 	ListPriceUSD float64 `json:"list_price_usd"`
 	Tokens       int64   `json:"tokens"`
@@ -49,14 +68,15 @@ type ConsumedUsage struct {
 }
 
 type Snapshot struct {
-	SchemaVersion    int             `json:"schema_version"`
-	Face             Face            `json:"face"`
-	AccountHome      string          `json:"account_home"`
-	AccountLabel     string          `json:"account_label"`
-	SessionAllowance AllowanceWindow `json:"session_allowance"`
-	WeeklyAllowance  AllowanceWindow `json:"weekly_allowance"`
-	UsageCredit      string          `json:"usage_credit"`
-	ConsumedUsage    ConsumedUsage   `json:"consumed_usage"`
-	FetchedAt        int64           `json:"fetched_at"`
-	Degraded         []string        `json:"degraded,omitempty"`
+	SchemaVersion    int              `json:"schema_version"`
+	Face             Face             `json:"face"`
+	AccountHome      string           `json:"account_home"`
+	AccountLabel     string           `json:"account_label"`
+	SessionAllowance AllowanceWindow  `json:"session_allowance"`
+	WeeklyAllowance  AllowanceWindow  `json:"weekly_allowance"`
+	UsageCredit      string           `json:"usage_credit"`
+	UsageCreditSpend UsageCreditSpend `json:"usage_credit_spend"`
+	ConsumedUsage    ConsumedUsage    `json:"consumed_usage"`
+	FetchedAt        int64            `json:"fetched_at"`
+	Degraded         []string         `json:"degraded,omitempty"`
 }

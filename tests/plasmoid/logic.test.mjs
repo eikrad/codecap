@@ -130,17 +130,23 @@ test("formatTimeToReset omits elapsed or missing reset times", () => {
     assert.equal(Logic.formatTimeToReset(1300, 1000), "5m");
 });
 
-test("allowanceFillColor maps utilization stale and usage credit states", () => {
-    assert.equal(Logic.allowanceFillColor(10, true, "none", colors), "gray");
-    assert.equal(Logic.allowanceFillColor(100, false, "none", colors), "red");
-    assert.equal(Logic.allowanceFillColor(100, false, "exhausted", colors), "red");
-    assert.equal(Logic.allowanceFillColor(85, false, "enabled", colors), "orange");
-    assert.equal(Logic.allowanceFillColor(20, false, "enabled", colors), "blue");
-    // Band edges. Whether Usage Credit alone colours the ring is decision D3 in
-    // docs/plan-hardening.md; these pin only what is settled today.
-    assert.equal(Logic.allowanceFillColor(80, false, "none", colors), "orange");
-    assert.equal(Logic.allowanceFillColor(79.9, false, "none", colors), "blue");
-    assert.equal(Logic.allowanceFillColor(100, true, "exhausted", colors), "gray");
+test("allowanceFillColor maps utilization and stale states", () => {
+    assert.equal(Logic.allowanceFillColor(10, true, colors), "gray");
+    assert.equal(Logic.allowanceFillColor(100, false, colors), "red");
+    assert.equal(Logic.allowanceFillColor(85, false, colors), "orange");
+    assert.equal(Logic.allowanceFillColor(20, false, colors), "blue");
+    // Band edges.
+    assert.equal(Logic.allowanceFillColor(80, false, colors), "orange");
+    assert.equal(Logic.allowanceFillColor(79.9, false, colors), "blue");
+    assert.equal(Logic.allowanceFillColor(100, true, colors), "gray");
+});
+
+// The reported bug: exhausted Usage Credit painted a Session at 37% red, so the
+// ring reported a monthly overage state instead of the window it draws. Usage
+// Credit is no longer a parameter, so the signature is what pins this; the case
+// is kept because it is the number that was actually on screen.
+test("allowanceFillColor colours a mid-band Session by its own fill", () => {
+    assert.equal(Logic.allowanceFillColor(37, false, colors), "blue");
 });
 
 test("effectiveCurrency prefers config override then locale mapping", () => {
@@ -266,4 +272,29 @@ test("describePayload names the shape for the log line", () => {
     assert.equal(Logic.describePayload(["a"]), "array[1]");
     assert.equal(Logic.describePayload({ value: 1, other: 2 }), "object{value,other}");
     assert.ok(Logic.describePayload("hello").startsWith("string hello"));
+});
+
+// Usage Credit is money, not a traffic light. The vendor shows "$4.04 of $4.00"
+// for the Account Home that prompted this; the widget showed only "exhausted".
+test("normalizeUsageCreditSpend carries the amounts through", () => {
+    const snap = Logic.parseSnapshot(JSON.stringify({
+        face: "ready",
+        usage_credit: "exhausted",
+        usage_credit_spend: { used_usd: 4.04, limit_usd: 4.0 }
+    }));
+    assert.equal(snap.usage_credit_spend.used_usd, 4.04);
+    assert.equal(snap.usage_credit_spend.limit_usd, 4.0);
+});
+
+// The helper and the plasmoid are installed and versioned separately, so the
+// field may simply not be there.
+test("normalizeUsageCreditSpend survives a helper that does not send it", () => {
+    const snap = Logic.parseSnapshot(JSON.stringify({ face: "ready", usage_credit: "enabled" }));
+    assert.deepEqual(snap.usage_credit_spend, { used_usd: 0, limit_usd: 0 });
+
+    for (const junk of [null, "4.04", [], { used_usd: "x", limit_usd: NaN }]) {
+        const s = Logic.parseSnapshot(JSON.stringify({ usage_credit_spend: junk }));
+        assert.equal(s.usage_credit_spend.used_usd, 0);
+        assert.equal(s.usage_credit_spend.limit_usd, 0);
+    }
 });

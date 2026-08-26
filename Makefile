@@ -14,15 +14,37 @@ PLASMOIDDIR := $(PREFIX)/share/plasma/plasmoids/dev.codecap.plasmoid
 BUILD_FLAGS := -trimpath -ldflags="-s -w"
 
 # Lint tooling. `make lint` needs golangci-lint, shellcheck and qmllint; CI
-# installs all three. qmllint is not on PATH on Debian/Ubuntu.
-QMLLINT ?= $(shell command -v qmllint 2>/dev/null || echo /usr/lib/qt6/bin/qmllint)
+# installs all three. qmllint is not on PATH on Debian/Ubuntu, and where a
+# distro ships both Qt versions the one on PATH is Qt 5 — which rejects
+# QMLLINT_FLAGS below as unknown options. Qt 6 is looked up first.
+QMLLINT ?= $(shell command -v qmllint6 2>/dev/null \
+	|| { test -x /usr/lib/qt6/bin/qmllint && echo /usr/lib/qt6/bin/qmllint; } \
+	|| command -v qmllint 2>/dev/null \
+	|| echo /usr/lib/qt6/bin/qmllint)
 
 # Plasma and Kirigami types cannot be resolved without a Plasma 6 install, so
 # import/type checking is off and qmllint runs as a syntax and structure gate.
 # Re-enable a category here once the CI image can resolve the imports.
-QMLLINT_FLAGS := --import disable --type disable --property disable \
-	--unqualified disable --alias disable --signal disable \
-	--deprecated disable --unused-imports disable
+#
+# Category names are not stable across Qt 6 point releases: `property` became
+# `property-override`, `alias` became `alias-cycle`, `signal` became
+# `signal-handler-parameters`, and `type` is gone. qmllint rejects an unknown
+# category outright, so naming them statically pins the Makefile to one Qt
+# version. Each line below lists the names for one category, newest first, and
+# only the first one this qmllint advertises is passed. A category that no
+# longer exists contributes nothing.
+QMLLINT_HELP := $(shell $(QMLLINT) --help 2>/dev/null)
+# `--name=disable` rather than `--name disable` so one candidate stays one word
+# and $(firstword) can pick it.
+qmllint-off = $(firstword $(foreach n,$(1),$(if $(findstring --$(n) ,$(QMLLINT_HELP)),--$(n)=disable)))
+QMLLINT_FLAGS := $(call qmllint-off,import) \
+	$(call qmllint-off,property-override property) \
+	$(call qmllint-off,unqualified) \
+	$(call qmllint-off,alias-cycle alias) \
+	$(call qmllint-off,signal-handler-parameters signal) \
+	$(call qmllint-off,deprecated) \
+	$(call qmllint-off,unused-imports) \
+	$(call qmllint-off,type)
 
 QML_SOURCES := plasmoid/contents/ui/*.qml plasmoid/contents/config/*.qml
 
@@ -30,9 +52,17 @@ QML_SOURCES := plasmoid/contents/ui/*.qml plasmoid/contents/config/*.qml
 # cannot see that QML types are not JavaScript types, or that QML's
 # Number.toLocaleString has different defaults from ECMAScript's — both of
 # which shipped as bugs.
-QMLTESTRUNNER ?= $(shell command -v qmltestrunner 2>/dev/null || echo /usr/lib/qt6/bin/qmltestrunner)
+# The applet is Qt 6, so the Qt 6 runner is looked up first. On a distro that
+# ships both, `qmltestrunner` on PATH is the Qt 5 one, and it fails on the
+# version-less `import QtQuick` with exit 1 and no output at all — which reads
+# as a broken test rather than as the wrong binary.
+QMLTESTRUNNER ?= $(shell command -v qmltestrunner6 2>/dev/null \
+	|| { test -x /usr/lib/qt6/bin/qmltestrunner && echo /usr/lib/qt6/bin/qmltestrunner; } \
+	|| command -v qmltestrunner 2>/dev/null \
+	|| echo /usr/lib/qt6/bin/qmltestrunner)
 
-.PHONY: build install install-all test test-plasmoid test-plasmoid-qml test-install \
+.PHONY: build install install-all test test-plasmoid test-plasmoid-qml \
+	test-plasmoid-qml-plasma test-install \
 	lint fmt-check lint-go lint-sh lint-qml ci clean
 
 build:
@@ -99,6 +129,18 @@ test-plasmoid:
 
 test-plasmoid-qml:
 	QT_QPA_PLATFORM=offscreen $(QMLTESTRUNNER) -input tests/plasmoid/qml
+	$(MAKE) test-plasmoid-qml-plasma
+
+# These load the applet's own components, so they need Kirigami. CI installs the
+# Qt QML modules only, and pulling KDE into it to run two colour assertions is a
+# bad trade — so this skips itself rather than failing there, and runs for real
+# on any machine that can actually display the widget.
+test-plasmoid-qml-plasma:
+	@if QT_QPA_PLATFORM=offscreen $(QMLTESTRUNNER) -input tests/plasmoid/qml-plasma 2>&1 | grep -q "module \"org.kde.kirigami\" is not installed"; then \
+		echo "skipping tests/plasmoid/qml-plasma: Kirigami not installed"; \
+	else \
+		QT_QPA_PLATFORM=offscreen $(QMLTESTRUNNER) -input tests/plasmoid/qml-plasma; \
+	fi
 
 install-all: build install
 

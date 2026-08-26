@@ -23,6 +23,7 @@ type SnapshotFields struct {
 	SessionAllowance snapshot.AllowanceWindow
 	WeeklyAllowance  snapshot.AllowanceWindow
 	UsageCredit      string
+	UsageCreditSpend snapshot.UsageCreditSpend
 	FetchedAt        int64
 }
 
@@ -83,10 +84,11 @@ func (s *Service) Resolve(ctx context.Context, accountHome string) (SnapshotFiel
 	fetchedAt := now.Unix()
 	if s.LastKnown != nil {
 		if saveErr := s.LastKnown.Save(accountHome, CachedAllowance{
-			FetchedAt:   fetchedAt,
-			Session:     result.Session,
-			Weekly:      result.Weekly,
-			UsageCredit: result.UsageCredit,
+			FetchedAt:        fetchedAt,
+			Session:          result.Session,
+			Weekly:           result.Weekly,
+			UsageCredit:      result.UsageCredit,
+			UsageCreditSpend: result.UsageCreditSpend,
 		}); saveErr != nil {
 			// Not fatal: the live result stands, only the offline fallback is
 			// missing. Reported so a broken cache directory is visible.
@@ -95,6 +97,7 @@ func (s *Service) Resolve(ctx context.Context, accountHome string) (SnapshotFiel
 				SessionAllowance: result.Session,
 				WeeklyAllowance:  result.Weekly,
 				UsageCredit:      result.UsageCredit,
+				UsageCreditSpend: result.UsageCreditSpend,
 				FetchedAt:        fetchedAt,
 			}, fmt.Errorf("cache last-known allowance: %w", saveErr)
 		}
@@ -105,6 +108,7 @@ func (s *Service) Resolve(ctx context.Context, accountHome string) (SnapshotFiel
 		SessionAllowance: result.Session,
 		WeeklyAllowance:  result.Weekly,
 		UsageCredit:      result.UsageCredit,
+		UsageCreditSpend: result.UsageCreditSpend,
 		FetchedAt:        fetchedAt,
 	}, nil
 }
@@ -125,6 +129,7 @@ func (s *Service) fallback(accountHome string, now time.Time, cause error) (Snap
 		SessionAllowance: cached.Session,
 		WeeklyAllowance:  cached.Weekly,
 		UsageCredit:      cached.UsageCredit,
+		UsageCreditSpend: cached.UsageCreditSpend,
 		FetchedAt:        cached.FetchedAt,
 	}, nil
 }
