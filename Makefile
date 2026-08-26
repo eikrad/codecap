@@ -86,6 +86,24 @@ install:
 	install -d $(DESTDIR)$(SYSTEMDUSERDIR)
 	install -m 644 contrib/systemd/codecap.service $(DESTDIR)$(SYSTEMDUSERDIR)/codecap.service
 	install -d $(DESTDIR)$(PLASMOIDDIR)
+	# Replace the package directory rather than merging into it. Naming the
+	# contents below keeps this install from *adding* anything unwanted, but it
+	# cannot remove what an earlier version put there: plasmoid/test/ shipped
+	# until the tests moved under tests/, and a copy from 2026-08-22 was still
+	# sitting in /usr after every upgrade since. Anything this version does not
+	# ship has no business surviving in the package directory.
+	#
+	# The case guard is why this is safe to run under sudo: PLASMOIDDIR is built
+	# from PREFIX, and a mis-set PREFIX would otherwise aim the rm somewhere
+	# else entirely. Only the contents go — the directory itself stays, so a
+	# DESTDIR staging root keeps whatever permissions it was created with.
+	@case "$(DESTDIR)$(PLASMOIDDIR)" in \
+		*/dev.codecap.plasmoid) \
+			rm -rf -- "$(DESTDIR)$(PLASMOIDDIR)"/* ;; \
+		*) \
+			echo "refusing to clear '$(DESTDIR)$(PLASMOIDDIR)': not a dev.codecap.plasmoid package directory"; \
+			exit 1 ;; \
+	esac
 	# Named explicitly. The tests live in tests/ rather than under plasmoid/
 	# so that kpackagetool6, which installs the whole directory, cannot ship
 	# them either; naming the contents here keeps that true by construction.
