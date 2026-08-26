@@ -376,3 +376,76 @@ func TestComputeAtSkipsASymlinkedLog(t *testing.T) {
 		t.Fatalf("a symlink out of the Account Home must not be read, got %d tokens", got.Today.Tokens)
 	}
 }
+
+// A one-hour cache entry costs 2x base input to write; a five-minute entry
+// costs 1.25x. The logs report the split, and pricing the whole line at the
+// five-minute rate understated cache writes by about half on the desktop this
+// was found on — 86% of its writes were one-hour.
+func TestEstimateListPriceUSDPricesCacheWritesByLifetime(t *testing.T) {
+	rates := DefaultRates()
+	const million = 1_000_000
+
+	oneHourOnly := tokenUsage{
+		CacheCreationInputTokens: million,
+		CacheCreation:            &cacheCreation{Ephemeral1hInputTokens: million},
+	}
+	fiveMinuteOnly := tokenUsage{
+		CacheCreationInputTokens: million,
+		CacheCreation:            &cacheCreation{Ephemeral5mInputTokens: million},
+	}
+
+	gotOneHour := estimateListPriceUSD(rates, "claude-opus-4-1", oneHourOnly)
+	gotFiveMinute := estimateListPriceUSD(rates, "claude-opus-4-1", fiveMinuteOnly)
+
+	if gotOneHour != 30.0 {
+		t.Errorf("one-hour write of 1M tokens = %v, want 30.0", gotOneHour)
+	}
+	if gotFiveMinute != 18.75 {
+		t.Errorf("five-minute write of 1M tokens = %v, want 18.75", gotFiveMinute)
+	}
+	if gotOneHour <= gotFiveMinute {
+		t.Errorf("a one-hour write must cost more than a five-minute one: %v vs %v", gotOneHour, gotFiveMinute)
+	}
+
+	// The real shape: both buckets populated in one event.
+	mixed := tokenUsage{
+		CacheCreationInputTokens: million,
+		CacheCreation: &cacheCreation{
+			Ephemeral1hInputTokens: 800_000,
+			Ephemeral5mInputTokens: 200_000,
+		},
+	}
+	want := 0.8*30.0 + 0.2*18.75
+	if got := estimateListPriceUSD(rates, "claude-opus-4-1", mixed); got != want {
+		t.Errorf("mixed write = %v, want %v", got, want)
+	}
+}
+
+func TestCacheWriteSplitHandlesPayloadsWithoutTheSplit(t *testing.T) {
+	// A Claude Code old enough not to report cache_creation. The lifetime is
+	// genuinely unknown, so it lands in the cheaper bucket — the behaviour this
+	// code had before the split existed.
+	legacy := tokenUsage{CacheCreationInputTokens: 500}
+	oneHour, fiveMinute := legacy.cacheWriteSplit()
+	if oneHour != 0 || fiveMinute != 500 {
+		t.Errorf("legacy payload split = (%d, %d), want (0, 500)", oneHour, fiveMinute)
+	}
+
+	// A total larger than its own split means the payload grew a bucket this
+	// code does not know about. The remainder must still be counted.
+	partial := tokenUsage{
+		CacheCreationInputTokens: 1000,
+		CacheCreation:            &cacheCreation{Ephemeral1hInputTokens: 600, Ephemeral5mInputTokens: 300},
+	}
+	oneHour, fiveMinute = partial.cacheWriteSplit()
+	if oneHour != 600 || fiveMinute != 400 {
+		t.Errorf("partial split = (%d, %d), want (600, 400) — the 100 unaccounted tokens must not vanish", oneHour, fiveMinute)
+	}
+
+	// Tokens reported only in the split, with no total, still price.
+	noTotal := tokenUsage{CacheCreation: &cacheCreation{Ephemeral1hInputTokens: 700}}
+	oneHour, fiveMinute = noTotal.cacheWriteSplit()
+	if oneHour != 700 || fiveMinute != 0 {
+		t.Errorf("split without total = (%d, %d), want (700, 0)", oneHour, fiveMinute)
+	}
+}
