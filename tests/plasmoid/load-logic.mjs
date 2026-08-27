@@ -30,6 +30,7 @@ export function loadLogic() {
             compactIcon,
             formatTimeToReset,
             allowanceFillColor,
+            trayStatus,
             localeCurrencyCode,
             effectiveCurrency,
             parseEcbRates,

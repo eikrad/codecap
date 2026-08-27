@@ -1,13 +1,26 @@
 {
     "KPlugin": {
-        "Id": "dev.codecap.plasmoid",
-        "Name": "codecap",
+        "Authors": [
+            {
+                "Email": "eikef.rades@protonmail.com",
+                "Name": "eikrad"
+            }
+        ],
+        "BugReportUrl": "https://github.com/eikrad/codecap/issues",
+        "Category": "System Information",
         "Description": "Coding-agent usage and Allowance for Plasma 6",
-        "Category": "Utilities",
+        "FormFactors": [
+            "desktop"
+        ],
         "Icon": "view-statistics",
-    "License": "GPL-2.0-or-later",
-    "Version": "0.2.0"
-  },
-  "KPackageStructure": "Plasma/Applet",
-  "X-Plasma-API-Minimum-Version": "6.0"
+        "Id": "dev.codecap.plasmoid",
+        "License": "GPL-2.0-or-later",
+        "Name": "codecap",
+        "Version": "0.2.0",
+        "Website": "https://github.com/eikrad/codecap"
+    },
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "X-Plasma-NotificationArea": "true",
+    "X-Plasma-NotificationAreaCategory": "ApplicationStatus"
 }

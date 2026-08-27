@@ -390,3 +390,20 @@ test("a reply that cannot be parsed is what drives staleSnapshot", () => {
     const parsed = Logic.parseSnapshot(Logic.extractSnapshotPayload(['{"face":"ready"}']));
     assert.equal(parsed.face, "ready");
 });
+
+test("trayStatus keeps faces that need the user visible", () => {
+    // P-M14: without a status binding the tray entry is always Active and can
+    // never auto-hide. Unbound / Signed Out need the user; a calm Session does not.
+    assert.equal(Logic.trayStatus("unbound", 0, false), "needsAttention");
+    assert.equal(Logic.trayStatus("signed_out", 0, false), "needsAttention");
+    assert.equal(Logic.trayStatus("unknown_allowance", 0, false), "active");
+});
+
+test("trayStatus follows the Session 80% band on the ready face", () => {
+    assert.equal(Logic.trayStatus("ready", 0, false), "passive");
+    assert.equal(Logic.trayStatus("ready", 79, false), "passive");
+    assert.equal(Logic.trayStatus("ready", 80, false), "active");
+    assert.equal(Logic.trayStatus("ready", 99, false), "active");
+    assert.equal(Logic.trayStatus("ready", 100, false), "needsAttention");
+    assert.equal(Logic.trayStatus("ready", 10, true), "needsAttention");
+});
