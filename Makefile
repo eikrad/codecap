@@ -68,12 +68,22 @@ QMLTESTRUNNER ?= $(shell command -v qmltestrunner6 2>/dev/null \
 	|| command -v qmltestrunner 2>/dev/null \
 	|| echo /usr/lib/qt6/bin/qmltestrunner)
 
-.PHONY: build install install-all test test-plasmoid test-plasmoid-qml \
-	test-plasmoid-qml-plasma test-plasmoid-qml-dbus test-install \
-	lint fmt-check lint-go lint-sh lint-qml ci clean
+VERSION := $(shell sed -n 's/.*"Version": "\([^"]*\)".*/\1/p' plasmoid/metadata.json | head -n 1)
+DIST := $(BINARY)-$(VERSION).tar.gz
+
+.PHONY: build install uninstall install-all dist test test-plasmoid \
+	test-plasmoid-qml test-plasmoid-qml-plasma test-plasmoid-qml-dbus \
+	test-install check-version lint fmt-check lint-go lint-sh lint-qml ci clean
 
 build:
 	$(GO) build $(BUILD_FLAGS) -o bin/$(BINARY) ./cmd/codecap
+
+# Substitute @BINDIR@ into the service templates. PREFIX is a real install
+# prefix now (H-11): without this, a PREFIX=/usr/local install still pointed
+# D-Bus at /usr/bin/codecap and the helper could never activate.
+define render-service
+	sed 's|@BINDIR@|$(BINDIR)|g' $(1) > $(2)
+endef
 
 # install deliberately does NOT depend on build. It runs under sudo, and a
 # rebuild as root inside the user's checkout fails outright — git refuses to
@@ -89,9 +99,11 @@ install:
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 755 bin/$(BINARY) $(DESTDIR)$(BINDIR)/$(BINARY)
 	install -d $(DESTDIR)$(DBUSDIR)
-	install -m 644 contrib/dbus/dev.codecap.Helper.service $(DESTDIR)$(DBUSDIR)/dev.codecap.Helper.service
+	$(call render-service,contrib/dbus/dev.codecap.Helper.service.in,$(DESTDIR)$(DBUSDIR)/dev.codecap.Helper.service)
+	chmod 644 $(DESTDIR)$(DBUSDIR)/dev.codecap.Helper.service
 	install -d $(DESTDIR)$(SYSTEMDUSERDIR)
-	install -m 644 contrib/systemd/codecap.service $(DESTDIR)$(SYSTEMDUSERDIR)/codecap.service
+	$(call render-service,contrib/systemd/codecap.service.in,$(DESTDIR)$(SYSTEMDUSERDIR)/codecap.service)
+	chmod 644 $(DESTDIR)$(SYSTEMDUSERDIR)/codecap.service
 	install -d $(DESTDIR)$(PLASMOIDDIR)
 	# Replace the package directory rather than merging into it. Naming the
 	# contents below keeps this install from *adding* anything unwanted, but it
@@ -116,6 +128,45 @@ install:
 	# them either; naming the contents here keeps that true by construction.
 	install -m 644 plasmoid/metadata.json $(DESTDIR)$(PLASMOIDDIR)/metadata.json
 	cp -a plasmoid/contents $(DESTDIR)$(PLASMOIDDIR)/
+
+# Same path guards as install: never rm outside the codecap package layout.
+uninstall:
+	@case "$(DESTDIR)$(PLASMOIDDIR)" in \
+		*/dev.codecap.plasmoid) ;; \
+		*) \
+			echo "refusing to uninstall '$(DESTDIR)$(PLASMOIDDIR)': not a dev.codecap.plasmoid package directory"; \
+			exit 1 ;; \
+	esac
+	rm -f -- "$(DESTDIR)$(BINDIR)/$(BINARY)"
+	rm -f -- "$(DESTDIR)$(DBUSDIR)/dev.codecap.Helper.service"
+	rm -f -- "$(DESTDIR)$(SYSTEMDUSERDIR)/codecap.service"
+	rm -rf -- "$(DESTDIR)$(PLASMOIDDIR)"
+
+# Reproducible source tarball for the PKGBUILD. Prefer git archive so the
+# checksum is stable across clean checkouts; fall back to tar of the tree when
+# this is not a git checkout (e.g. an already-extracted release).
+dist:
+	@test -n "$(VERSION)" || { echo "could not read Version from plasmoid/metadata.json"; exit 1; }
+	@if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
+		git archive --format=tar.gz --prefix=$(BINARY)-$(VERSION)/ \
+			-o $(DIST) HEAD; \
+	else \
+		tar --exclude=$(DIST) --exclude=./.git --exclude=./bin \
+			--exclude=./.install-test --exclude=./pkg --exclude=./src \
+			--exclude=./.gocache \
+			--transform='s,^\./,$(BINARY)-$(VERSION)/,' \
+			-czf $(DIST) .; \
+	fi
+	@echo "wrote $(DIST)"
+
+check-version:
+	@test -n "$(VERSION)" || { echo "could not read Version from plasmoid/metadata.json"; exit 1; }
+	@pkgver=$$(sed -n 's/^pkgver=//p' PKGBUILD | head -n 1); \
+	if [ "$$pkgver" != "$(VERSION)" ]; then \
+		echo "PKGBUILD pkgver=$$pkgver does not match metadata Version=$(VERSION)"; \
+		exit 1; \
+	fi
+	@echo "version ok: $(VERSION)"
 
 fmt-check:
 	@unformatted="$$(gofmt -l .)"; \
@@ -180,10 +231,10 @@ test-plasmoid-qml-dbus:
 
 install-all: build install
 
-ci: lint test test-install
+ci: check-version lint test test-install
 
 test-install: build
-	rm -rf .install-test
+	rm -rf .install-test .install-test-local
 	@if $(MAKE) -n install DESTDIR=$(CURDIR)/.install-test | grep -q '$(GO) build'; then \
 		echo "FAIL: make install would run the Go toolchain."; \
 		echo "It runs under sudo, and a rebuild as root fails on VCS ownership and"; \
@@ -192,7 +243,18 @@ test-install: build
 	fi
 	$(MAKE) install DESTDIR=$(CURDIR)/.install-test
 	scripts/verify-install.sh $(CURDIR)/.install-test
-	rm -rf .install-test
+	# H-11: PREFIX must rewrite both service files. A /usr/local install that
+	# still pointed at /usr/bin/codecap left the helper unreachable forever.
+	$(MAKE) install DESTDIR=$(CURDIR)/.install-test-local PREFIX=/usr/local
+	scripts/verify-install.sh $(CURDIR)/.install-test-local /usr/local
+	$(MAKE) uninstall DESTDIR=$(CURDIR)/.install-test-local PREFIX=/usr/local
+	@if [ -e $(CURDIR)/.install-test-local/usr/local/bin/$(BINARY) ]; then \
+		echo "FAIL: uninstall left $(BINARY) behind"; exit 1; \
+	fi
+	@if [ -e $(CURDIR)/.install-test-local/usr/local/share/plasma/plasmoids/dev.codecap.plasmoid ]; then \
+		echo "FAIL: uninstall left the plasmoid tree behind"; exit 1; \
+	fi
+	rm -rf .install-test .install-test-local
 
 clean:
-	rm -rf bin/ .install-test
+	rm -rf bin/ .install-test .install-test-local $(DIST)

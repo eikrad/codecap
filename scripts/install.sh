@@ -25,12 +25,20 @@ if command -v pkill >/dev/null 2>&1; then
 fi
 
 if [ -d "$LOCAL_PLASMOID" ]; then
-	echo "Removing user-local plasmoid (system install uses /usr/share)..."
-	if command -v kpackagetool6 >/dev/null 2>&1; then
-		kpackagetool6 --type Plasma/Applet --remove dev.codecap.plasmoid
-	else
-		rm -rf "$LOCAL_PLASMOID"
-	fi
+	printf "Remove user-local plasmoid at %s so the system package is used? [y/N] " "$LOCAL_PLASMOID"
+	read -r answer
+	case "$answer" in
+	y | Y | yes | YES)
+		if command -v kpackagetool6 >/dev/null 2>&1; then
+			kpackagetool6 --type Plasma/Applet --remove dev.codecap.plasmoid
+		else
+			rm -rf -- "$LOCAL_PLASMOID"
+		fi
+		;;
+	*)
+		echo "Keeping $LOCAL_PLASMOID (it shadows the system install)"
+		;;
+	esac
 fi
 
 cat <<EOF
@@ -48,4 +56,7 @@ Helper check:
 
 Plasmoid-only dev updates (after this install):
   ./scripts/install-plasmoid.sh
+
+To remove later:
+  ./scripts/uninstall.sh
 EOF
