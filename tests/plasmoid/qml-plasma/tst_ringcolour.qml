@@ -37,11 +37,21 @@ TestCase {
         compare(ring.ringColor, Kirigami.Theme.highlightColor)
     }
 
+    // The percentage Heading's `text: i18n(...)` binding (CompactRing.qml:92)
+    // re-evaluates on every usedPercent change. i18n() is normally a context
+    // object Plasma's KPackage loader installs on the QQmlEngine before any
+    // applet QML runs; qmltestrunner has no such loader, so the call throws
+    // here every time. That is a gap in this harness, not in the component —
+    // a real Plasma session always has i18n available — so the warning is
+    // expected and silenced rather than worked around in application code.
     function test_bands_follow_the_session_fill() {
+        ignoreWarning(/ReferenceError: i18n is not defined/)
         ring.usedPercent = 85
         compare(ring.ringColor, Kirigami.Theme.neutralTextColor)
+        ignoreWarning(/ReferenceError: i18n is not defined/)
         ring.usedPercent = 100
         compare(ring.ringColor, Kirigami.Theme.negativeTextColor)
+        ignoreWarning(/ReferenceError: i18n is not defined/)
         ring.usedPercent = 37
         ring.stale = true
         compare(ring.ringColor, Kirigami.Theme.disabledTextColor)
