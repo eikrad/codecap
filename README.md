@@ -67,7 +67,7 @@ make build
 sudo make install
 ```
 
-`PREFIX` is honoured end-to-end: both service files are templated at install time, so `sudo make install PREFIX=/usr/local` activates `/usr/local/bin/codecap`.
+`PREFIX` is honoured end-to-end: both service files are templated at install time, so `sudo make install PREFIX=/usr/local` activates `/usr/local/bin/codecap`. Both scripts take it from the environment — `PREFIX=/usr/local ./scripts/install.sh`, and the same value when you later uninstall.
 
 This installs:
 

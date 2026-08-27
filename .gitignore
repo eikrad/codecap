@@ -7,7 +7,7 @@
 /.gocache/
 *.pkg.tar.zst
 *.pkg.tar.zst.sig
-codecap-*.tar.gz
+/codecap-*.tar.gz
 .env
 .env.*
 .DS_Store

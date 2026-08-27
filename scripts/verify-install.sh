@@ -42,9 +42,12 @@ require "$META"
 
 # --- binary ---------------------------------------------------------------
 
+# Exactly 755. A leading-wildcard match here would also accept 4755 and 6755 —
+# a set-uid helper reading credentials out of other users' Account Homes is the
+# one mode this check exists to refuse.
 mode=$(stat -c '%a' "$BIN" 2>/dev/null || stat -f '%OLp' "$BIN")
 case "$mode" in
-*755 | 755 | 0755) ;;
+755 | 0755) ;;
 *) fail "codecap mode is $mode, expected 755" ;;
 esac
 
@@ -59,6 +62,8 @@ dbus_exec=$(sed -n 's/^Exec=//p' "$DBUS" | head -n 1)
 dbus_systemd=$(sed -n 's/^SystemdService=//p' "$DBUS" | head -n 1)
 unit_bus=$(sed -n 's/^BusName=//p' "$SYSTEMD" | head -n 1)
 unit_exec=$(sed -n 's/^ExecStart=//p' "$SYSTEMD" | head -n 1)
+unit_type=$(sed -n 's/^Type=//p' "$SYSTEMD" | head -n 1)
+unit_restart=$(sed -n 's/^Restart=//p' "$SYSTEMD" | head -n 1)
 
 [ -n "$dbus_name" ] || fail "D-Bus service missing Name="
 [ -n "$dbus_exec" ] || fail "D-Bus service missing Exec="
@@ -72,6 +77,19 @@ unit_exec=$(sed -n 's/^ExecStart=//p' "$SYSTEMD" | head -n 1)
 expected_bin="$PREFIX/bin/codecap"
 [ "$dbus_exec" = "$expected_bin" ] || fail "D-Bus Exec=$dbus_exec, expected $expected_bin (H-11)"
 [ "$unit_exec" = "$expected_bin" ] || fail "ExecStart=$unit_exec, expected $expected_bin (H-11)"
+
+# Type=dbus is what makes BusName= mean anything: it is how systemd knows the
+# helper has finished starting, and it is the half of the H-6 handshake the
+# D-Bus side cannot assert on its own.
+[ "$unit_type" = "dbus" ] || fail "systemd unit Type=$unit_type, expected dbus (H-6)"
+
+# ADR 0015 says systemd restarts the helper when it crashes. That claim was
+# prose for three months while the unit had no [Install] section at all, so it
+# gets an assertion rather than a promise.
+case "$unit_restart" in
+on-failure | always | on-abnormal) ;;
+*) fail "systemd unit Restart=$unit_restart, expected on-failure (ADR 0015 / H-6)" ;;
+esac
 
 if ! grep -q '^WantedBy=default.target$' "$SYSTEMD"; then
 	fail "systemd unit missing [Install] WantedBy=default.target (H-6)"
@@ -111,17 +129,9 @@ if command -v kpackagetool6 >/dev/null 2>&1; then
 	fi
 fi
 
-# --- version sync (H-8) ---------------------------------------------------
-# PKGBUILD lives at the repo root relative to this script; when verifying a
-# DESTDIR staging tree from `make test-install`, the checkout is still here.
-SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
-REPO_ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)
-if [ -f "$REPO_ROOT/PKGBUILD" ]; then
-	pkgver=$(sed -n 's/^pkgver=//p' "$REPO_ROOT/PKGBUILD" | head -n 1)
-	metaver=$(sed -n 's/.*"Version": "\([^"]*\)".*/\1/p' "$META" | head -n 1)
-	[ -n "$pkgver" ] || fail "could not read pkgver from PKGBUILD"
-	[ -n "$metaver" ] || fail "could not read Version from metadata.json"
-	[ "$pkgver" = "$metaver" ] || fail "PKGBUILD pkgver=$pkgver does not match metadata Version=$metaver"
-fi
+# PKGBUILD pkgver ↔ metadata Version (H-8) is `make check-version`, not this
+# script. It is a property of the checkout, not of the installed tree: reading
+# the repo's PKGBUILD while verifying a tree installed from an older tag would
+# fail on a version skew that is entirely legitimate.
 
 echo "install tree ok: $ROOT (PREFIX=$PREFIX)"

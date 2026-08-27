@@ -14,13 +14,22 @@ LOCAL_PLASMOID="$HOME/.local/share/plasma/plasmoids/dev.codecap.plasmoid"
 
 cd "$ROOT"
 
-echo "Removing system files (sudo required)..."
-sudo make uninstall PREFIX="$PREFIX"
-
-# The helper stays up for the graphical session (ADR 0015). Stop it so a
-# leftover process is not serving after the binary is gone.
+# Stop the unit before the file goes: `disable` reads the [Install] section out
+# of the unit to know which symlinks it made, so removing the file first leaves
+# them behind and systemd complains about a unit it can no longer find. The
+# helper stays up for the graphical session (ADR 0015), so this is also what
+# stops a leftover process serving after the binary is gone.
 if command -v systemctl >/dev/null 2>&1; then
 	systemctl --user disable --now codecap.service 2>/dev/null || true
+fi
+
+echo "Removing system files from $PREFIX (sudo required)..."
+sudo make uninstall PREFIX="$PREFIX"
+
+if command -v systemctl >/dev/null 2>&1; then
+	if ! systemctl --user daemon-reload; then
+		echo "WARNING: systemd user units could not be reloaded; re-login to clear cached unit state." >&2
+	fi
 fi
 if command -v pkill >/dev/null 2>&1; then
 	pkill -x codecap 2>/dev/null || true

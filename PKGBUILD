@@ -16,7 +16,6 @@ depends=(
 )
 makedepends=(
   'go'
-  'git'
 )
 options=('!strip')
 # Local tarball from `make dist`. When publishing to the AUR, switch to the

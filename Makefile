@@ -71,7 +71,7 @@ QMLTESTRUNNER ?= $(shell command -v qmltestrunner6 2>/dev/null \
 VERSION := $(shell sed -n 's/.*"Version": "\([^"]*\)".*/\1/p' plasmoid/metadata.json | head -n 1)
 DIST := $(BINARY)-$(VERSION).tar.gz
 
-.PHONY: build install uninstall install-all dist test test-plasmoid \
+.PHONY: build install uninstall dist test test-plasmoid \
 	test-plasmoid-qml test-plasmoid-qml-plasma test-plasmoid-qml-dbus \
 	test-install check-version lint fmt-check lint-go lint-sh lint-qml ci clean
 
@@ -93,7 +93,7 @@ endef
 install:
 	@test -f bin/$(BINARY) || { \
 		echo "bin/$(BINARY) not found. Run 'make build' as your own user first,"; \
-		echo "or use 'make install-all' to build and install in one step."; \
+		echo "then run 'sudo make install'."; \
 		exit 1; \
 	}
 	install -d $(DESTDIR)$(BINDIR)
@@ -148,6 +148,10 @@ uninstall:
 dist:
 	@test -n "$(VERSION)" || { echo "could not read Version from plasmoid/metadata.json"; exit 1; }
 	@if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
+		if [ -n "$$(git status --porcelain)" ]; then \
+			echo "WARNING: working tree is dirty; $(DIST) is built from HEAD,"; \
+			echo "         not from what you have been testing."; \
+		fi; \
 		git archive --format=tar.gz --prefix=$(BINARY)-$(VERSION)/ \
 			-o $(DIST) HEAD; \
 	else \
@@ -168,8 +172,13 @@ check-version:
 	fi
 	@echo "version ok: $(VERSION)"
 
+# gofmt walks whatever it is pointed at. `.` includes a GOCACHE or GOMODCACHE
+# someone parked inside the checkout — hundreds of megabytes of upstream Go
+# source, some of it deliberately unformatted parser testdata, none of it ours.
+# The dot-directory prune also covers .git and the DESTDIR staging trees.
 fmt-check:
-	@unformatted="$$(gofmt -l .)"; \
+	@files="$$(find . -type d -name '.?*' -prune -o -type f -name '*.go' -print)"; \
+	unformatted="$$(gofmt -l $$files)"; \
 	if [ -n "$$unformatted" ]; then \
 		echo "gofmt needed:"; echo "$$unformatted"; \
 		gofmt -d $$unformatted; \
@@ -229,8 +238,6 @@ test-plasmoid-qml-plasma:
 test-plasmoid-qml-dbus:
 	QMLTESTRUNNER="$(QMLTESTRUNNER)" scripts/run-qml-dbus-tests.sh
 
-install-all: build install
-
 ci: check-version lint test test-install
 
 test-install: build
@@ -247,13 +254,19 @@ test-install: build
 	# still pointed at /usr/bin/codecap left the helper unreachable forever.
 	$(MAKE) install DESTDIR=$(CURDIR)/.install-test-local PREFIX=/usr/local
 	scripts/verify-install.sh $(CURDIR)/.install-test-local /usr/local
+	# The gate itself: break one thing at a time and require a non-zero exit.
+	# Without this, a check that stopped checking looks like a passing check.
+	scripts/test-verify-install.sh $(CURDIR)/.install-test-local /usr/local
 	$(MAKE) uninstall DESTDIR=$(CURDIR)/.install-test-local PREFIX=/usr/local
-	@if [ -e $(CURDIR)/.install-test-local/usr/local/bin/$(BINARY) ]; then \
-		echo "FAIL: uninstall left $(BINARY) behind"; exit 1; \
-	fi
-	@if [ -e $(CURDIR)/.install-test-local/usr/local/share/plasma/plasmoids/dev.codecap.plasmoid ]; then \
-		echo "FAIL: uninstall left the plasmoid tree behind"; exit 1; \
-	fi
+	@for leftover in \
+		usr/local/bin/$(BINARY) \
+		usr/local/share/dbus-1/services/dev.codecap.Helper.service \
+		usr/local/lib/systemd/user/codecap.service \
+		usr/local/share/plasma/plasmoids/dev.codecap.plasmoid; do \
+		if [ -e $(CURDIR)/.install-test-local/$$leftover ]; then \
+			echo "FAIL: uninstall left $$leftover behind"; exit 1; \
+		fi; \
+	done
 	rm -rf .install-test .install-test-local
 
 clean:
