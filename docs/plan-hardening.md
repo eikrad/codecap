@@ -288,6 +288,21 @@ benchmark is in CI so a regression is visible.
 files point at the right binary and `verify-install.sh` passes for both prefixes; and
 `makepkg` builds, runs `check()`, and installs a package that resolves on Plasma 6.
 
+**Still open.** The code and the DESTDIR gate are in place; two things are not:
+
+1. **AUR integrity (4.5).** `PKGBUILD` still uses a local `make dist` tarball and
+   `sha256sums=('SKIP')`. Pinning a checksum needs a tagged GitHub release first —
+   switch `source=` to that archive and replace `SKIP` when publishing. Until then
+   the package is installable from a checkout, not from the AUR.
+2. **Plasma 6 desktop.** No one has yet installed this branch on a real session and
+   checked: D-Bus activation starts `codecap.service` (not a bare `Exec=` fork);
+   `systemctl --user status codecap.service` after the first widget call; a crash
+   restarts the helper; the applet can sit in the system tray and auto-hide below
+   80 % Session; `PREFIX=/usr/local` service files point at `/usr/local/bin/codecap`.
+
+`make test-install` covers the layout and the negative gate. It cannot prove
+activation or tray behaviour.
+
 ---
 
 ## Phase 5 · Test depth
