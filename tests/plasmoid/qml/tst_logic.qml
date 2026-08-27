@@ -72,4 +72,39 @@ TestCase {
         compare(snap.face, "ready")
         compare(snap.consumed_usage.today.tokens, 0)
     }
+
+    function test_an_array_reply_is_unreadable_not_unbound() {
+        // typeof [] is "object" in every JS engine, and the guard that rejects
+        // it uses Array.isArray — which this pins in the engine that actually
+        // runs it, not in Node. Without the guard the payload became the empty
+        // snapshot, whose face is "unbound": the widget would tell the user to
+        // choose an Account Home because the helper misbehaved.
+        compare(Logic.parseSnapshot("[]"), null)
+        compare(Logic.parseSnapshot('[{"face":"ready"}]'), null)
+        compare(Logic.parseSnapshot("null"), null)
+    }
+
+    // These decide what the widget shows when the helper gives it nothing
+    // usable. They ran nowhere until they moved out of main.qml.
+    function test_staleSnapshot_keeps_last_known_and_marks_it() {
+        var ready = Logic.parseSnapshot('{"face":"ready","session_allowance":{"used_percent":37},"weekly_allowance":{"used_percent":61}}')
+        var stale = Logic.staleSnapshot(ready, "/home/me/.claude")
+
+        compare(stale.face, "ready")
+        compare(stale.session_allowance.used_percent, 37)
+        verify(stale.session_allowance.stale)
+        verify(stale.weekly_allowance.stale)
+        // The snapshot still assigned to the property must not have moved.
+        verify(!ready.session_allowance.stale)
+    }
+
+    function test_staleSnapshot_falls_back_to_unknown_allowance() {
+        compare(Logic.staleSnapshot(null, "/home/me/.claude").face, "unknown_allowance")
+        compare(Logic.staleSnapshot(Logic.emptySnapshot(), "/home/me/.claude").face, "unknown_allowance")
+    }
+
+    function test_localFaceSnapshot_names_the_home_only_when_bound() {
+        compare(Logic.localFaceSnapshot("unbound", "/home/me/.claude").account_home, "")
+        compare(Logic.localFaceSnapshot("signed_out", "/home/me/.claude").account_home, "/home/me/.claude")
+    }
 }

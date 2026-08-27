@@ -298,3 +298,95 @@ test("normalizeUsageCreditSpend survives a helper that does not send it", () => 
         assert.equal(s.usage_credit_spend.limit_usd, 0);
     }
 });
+
+// The face decisions below used to live in main.qml, where nothing could run
+// them: PlasmoidItem only works inside Plasma's applet machinery. They moved
+// into logic.js so these tests can exist — the missing half of findings P-M4
+// and P-M6, both of which are about what the widget shows when the helper
+// gives it nothing usable.
+
+test("localFaceSnapshot builds a complete face, never a partial one", () => {
+    const unbound = Logic.localFaceSnapshot("unbound", "/home/me/.claude");
+    assert.equal(unbound.face, "unbound");
+    // Unbound means no Account Home is chosen, so naming one would contradict
+    // the face the user is being shown.
+    assert.equal(unbound.account_home, "");
+    assert.equal(unbound.session_allowance.used_percent, 0);
+    assert.equal(unbound.consumed_usage.today.tokens, 0);
+
+    const unknown = Logic.localFaceSnapshot("unknown_allowance", "/home/me/.claude");
+    assert.equal(unknown.face, "unknown_allowance");
+    assert.equal(unknown.account_home, "/home/me/.claude");
+});
+
+test("localFaceSnapshot returns a fresh object every time", () => {
+    // Two callers sharing one object is how a mutation reaches a snapshot that
+    // has already been assigned, which fires no change signal (P-H3).
+    const first = Logic.localFaceSnapshot("unbound", "");
+    const second = Logic.localFaceSnapshot("unbound", "");
+    assert.notEqual(first, second);
+    first.face = "ready";
+    assert.equal(second.face, "unbound");
+});
+
+test("staleSnapshot keeps Last-Known Allowance visible instead of blanking it", () => {
+    // ADR 0006: a failed call shows what was last known, with staleness shown.
+    // Blanking it was P-M4 — the popup went empty the moment the helper hiccuped.
+    const ready = Logic.parseSnapshot(JSON.stringify({
+        schema_version: 1,
+        face: "ready",
+        account_home: "/home/me/.claude",
+        account_label: "me@example.invalid",
+        session_allowance: { used_percent: 37, resets_at: 1756203600, stale: false },
+        weekly_allowance: { used_percent: 61, resets_at: 1756720000, stale: false },
+        consumed_usage: { today: { list_price_usd: 3.5, tokens: 222 } }
+    }));
+
+    const stale = Logic.staleSnapshot(ready, "/home/me/.claude");
+    assert.equal(stale.face, "ready");
+    assert.equal(stale.session_allowance.used_percent, 37);
+    assert.equal(stale.weekly_allowance.used_percent, 61);
+    assert.equal(stale.session_allowance.stale, true);
+    assert.equal(stale.weekly_allowance.stale, true);
+    assert.equal(stale.account_label, "me@example.invalid");
+    assert.equal(stale.consumed_usage.today.tokens, 222);
+});
+
+test("staleSnapshot does not mutate the snapshot it was given", () => {
+    // The previous snapshot is still assigned to a property that bindings are
+    // reading. Marking it stale in place would change what they see without
+    // firing anything.
+    const ready = Logic.parseSnapshot('{"face":"ready","session_allowance":{"used_percent":37}}');
+    const stale = Logic.staleSnapshot(ready, "/home/me/.claude");
+    assert.equal(ready.session_allowance.stale, false);
+    assert.equal(stale.session_allowance.stale, true);
+    assert.notEqual(ready, stale);
+});
+
+test("staleSnapshot maps anything unusable to Unknown Allowance, not Unbound", () => {
+    // P-M6. Unbound tells the user they have not chosen an Account Home, which
+    // is a different thing from "the helper said nothing I could read" — and it
+    // is the one that made a broken helper look like a configuration mistake.
+    for (const previous of [
+        null,
+        undefined,
+        Logic.emptySnapshot(),
+        Logic.localFaceSnapshot("signed_out", "/home/me/.claude"),
+        Logic.localFaceSnapshot("unknown_allowance", "/home/me/.claude"),
+        { face: "ready" }.nothing
+    ]) {
+        const result = Logic.staleSnapshot(previous, "/home/me/.claude");
+        assert.equal(result.face, "unknown_allowance");
+        assert.equal(result.account_home, "/home/me/.claude");
+    }
+});
+
+test("a reply that cannot be parsed is what drives staleSnapshot", () => {
+    // The two halves as SnapshotSource.refresh chains them: parseSnapshot
+    // returns null for anything unreadable, and null is what selects the face.
+    for (const payload of ["not-json", "", "   ", "[]", '{"face":', "null"]) {
+        assert.equal(Logic.parseSnapshot(Logic.extractSnapshotPayload(payload)), null);
+    }
+    const parsed = Logic.parseSnapshot(Logic.extractSnapshotPayload(['{"face":"ready"}']));
+    assert.equal(parsed.face, "ready");
+});

@@ -24,6 +24,8 @@ export function loadLogic() {
             parseSnapshot,
             extractSnapshotPayload,
             describePayload,
+            localFaceSnapshot,
+            staleSnapshot,
             showAllowanceBars,
             compactIcon,
             formatTimeToReset,

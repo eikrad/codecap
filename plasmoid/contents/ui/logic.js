@@ -203,13 +203,50 @@ function parseSnapshot(jsonString) {
     }
     try {
         var decoded = JSON.parse(jsonString)
-        if (!decoded || typeof decoded !== "object") {
+        // An array is typeof "object", so without the check a reply of "[]"
+        // reached normalizeSnapshot, which found no face on it and returned the
+        // empty snapshot — face "unbound". That tells the user they have not
+        // chosen an Account Home when what actually happened is that the helper
+        // sent something unreadable. That is finding P-M6 by another route.
+        if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) {
             return null
         }
         return normalizeSnapshot(decoded)
     } catch (e) {
         return null
     }
+}
+
+// The face for a state the plasmoid decides on its own, with no helper reply
+// involved: no Account Home bound, or a call that produced nothing usable.
+//
+// It returns the snapshot rather than assigning one, because assigning a var
+// property fires the change signal and mutating it afterwards does not — every
+// face has to be complete before it is assigned (finding P-H3). Building it
+// here also means the decision is testable: a .qml file is not code CI can run.
+function localFaceSnapshot(face, accountHome) {
+    var next = emptySnapshot()
+    next.face = face
+    if (face !== "unbound") {
+        next.account_home = accountHome
+    }
+    return next
+}
+
+// What to show when the call failed, or its reply could not be read.
+//
+// ADR 0006 keeps Last-Known Allowance visible with staleness shown, so a ready
+// snapshot survives with both windows marked stale rather than being blanked
+// (finding P-M4). Anything else becomes Unknown Allowance — never Unbound,
+// which would claim the user has not chosen an Account Home (finding P-M6).
+function staleSnapshot(previous, accountHome) {
+    if (previous && previous.face === "ready") {
+        var next = normalizeSnapshot(previous)
+        next.session_allowance.stale = true
+        next.weekly_allowance.stale = true
+        return next
+    }
+    return localFaceSnapshot("unknown_allowance", accountHome)
 }
 
 function showAllowanceBars(face) {
