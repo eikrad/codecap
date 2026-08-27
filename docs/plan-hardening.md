@@ -16,9 +16,10 @@ Finding IDs (`C-2`, `P-C1`, …) refer to the audit.
 | **1 · Make it work** | **Code done, not yet run on a Plasma 6 desktop.** See the caveat below. |
 | **2 · Stop the bleeding** | **Done.** One deviation from 2.1, recorded below. |
 | **3 · Move the work** | **Done**, except byte-level incremental parsing — see below. |
+| **4 · Make it installable** | **Done.** Service templating, systemd activation, PREFIX-aware verify/uninstall, Plasma 6 PKGBUILD, tray metadata. AUR publish still needs a tagged release tarball + pinned `sha256sums`. |
 | **5.2 · QML component tests** | **Done.** `tests/plasmoid/qml` and `tests/plasmoid/qml-plasma`. |
 | **5.3 · D-Bus harness** | **Written and wired; its assertions have never executed.** See below. |
-| 4, 6, rest of 5 | Not started. |
+| 6, rest of 5 | Not started. |
 
 **Reordered after real-desktop testing.** See the addendum in
 [`audit-2026-08-22.md`](./audit-2026-08-22.md). Phase 5.2 (a QML test harness) cost
