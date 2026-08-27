@@ -46,7 +46,14 @@ QMLLINT_FLAGS := $(call qmllint-off,import) \
 	$(call qmllint-off,unused-imports) \
 	$(call qmllint-off,type)
 
-QML_SOURCES := plasmoid/contents/ui/*.qml plasmoid/contents/config/*.qml
+# The test suites are linted too. tests/plasmoid/qml-plasma and
+# tests/plasmoid/qml-dbus skip themselves wherever their Plasma imports are
+# missing, which is everywhere except a Plasma 6 desktop — so a syntax error in
+# one of them would otherwise sit undetected until someone with that desktop
+# happened to run it.
+QML_SOURCES := plasmoid/contents/ui/*.qml plasmoid/contents/config/*.qml \
+	tests/plasmoid/qml/*.qml tests/plasmoid/qml-plasma/*.qml \
+	tests/plasmoid/qml-dbus/*.qml
 
 # qmltestrunner executes logic.js inside a real QML engine. The Node tests
 # cannot see that QML types are not JavaScript types, or that QML's
@@ -62,7 +69,7 @@ QMLTESTRUNNER ?= $(shell command -v qmltestrunner6 2>/dev/null \
 	|| echo /usr/lib/qt6/bin/qmltestrunner)
 
 .PHONY: build install install-all test test-plasmoid test-plasmoid-qml \
-	test-plasmoid-qml-plasma test-install \
+	test-plasmoid-qml-plasma test-plasmoid-qml-dbus test-install \
 	lint fmt-check lint-go lint-sh lint-qml ci clean
 
 build:
@@ -159,6 +166,17 @@ test-plasmoid-qml-plasma:
 	else \
 		QT_QPA_PLATFORM=offscreen $(QMLTESTRUNNER) -input tests/plasmoid/qml-plasma; \
 	fi
+	$(MAKE) test-plasmoid-qml-dbus
+
+# Phase 5.3: the applet's own SnapshotSource against a stub helper on a private
+# session bus. This is the only thing in the repo that executes the D-Bus half
+# of the plasmoid — half of the criticals of 2026-08-22 were handler names that
+# nothing called, and no other gate here can see that.
+#
+# The script starts the bus and the stub, and skips itself with a reason when
+# the Plasma 6 QML D-Bus module is missing (CI, and every Plasma 5 distro).
+test-plasmoid-qml-dbus:
+	QMLTESTRUNNER="$(QMLTESTRUNNER)" scripts/run-qml-dbus-tests.sh
 
 install-all: build install
 
