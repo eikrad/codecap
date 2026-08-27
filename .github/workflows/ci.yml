@@ -85,10 +85,24 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install Qt QML tooling
+      # The D-Bus harness (tests/plasmoid/qml-dbus) builds a stub helper and
+      # starts a private bus before it can decide whether it can run. Neither is
+      # here for its own sake: the suite itself always skips in CI, because
+      # org.kde.plasma.workspace.dbus is a Plasma 6 module and pulling KDE in to
+      # run it would be a bad trade. What this buys is that everything up to
+      # that skip — the stub building, taking the bus name, and the runner being
+      # invoked — is exercised on every PR instead of only on a KDE desktop.
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Install Qt QML tooling and D-Bus
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
+            dbus \
             qt6-declarative-dev-tools \
             qml6-module-qtcore \
             qml6-module-qtqml \

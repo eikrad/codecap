@@ -172,9 +172,23 @@ resource, so exhausting them breaks the whole desktop session, not just this hel
 
 ```
 make lint     # gofmt, go vet, golangci-lint+gosec, shellcheck, qmllint
-make test     # go test -race, node --test
+make test     # go test -race, node --test, qmltestrunner
 make ci       # the above plus the install-layout check
 ```
+
+Two of the QML suites skip themselves unless the machine can display the widget,
+and both print why rather than passing quietly:
+
+```
+make test-plasmoid-qml-plasma  # needs Kirigami
+make test-plasmoid-qml-dbus    # needs org.kde.plasma.workspace.dbus (Plasma 6)
+```
+
+`test-plasmoid-qml-dbus` is the only thing here that executes the plasmoid's
+D-Bus code. It starts a private session bus and a stub `dev.codecap.Helper`
+(`tests/helperstub`), then drives the applet's own `SnapshotSource` against it.
+**Run it on the desktop after any change to `SnapshotSource.qml`.** In CI it
+gets as far as building the stub and taking the bus name, and then skips.
 
 Green does not mean done. Also state, in the message you hand back:
 
@@ -195,6 +209,9 @@ Never report a phase complete on the strength of the pipeline alone.
 - The plasmoid never reads credentials and never holds a token (ADR 0007, 0008).
   Keep vendor HTTP in the helper.
 - Testable logic goes in `logic.js`, not in `.qml` — it is the only plasmoid code CI
-  can actually execute.
+  can actually execute. What genuinely has to be QML goes in a component taking
+  plain properties, like `CompactRing` and `SnapshotSource`, so a test runner can
+  instantiate it. `main.qml` itself never can: `PlasmoidItem` only works inside
+  Plasma's applet machinery, and `Plasmoid.configuration` is null anywhere else.
 - Decisions belong in an ADR. If you find yourself choosing between two designs
   mid-implementation, stop and ask.

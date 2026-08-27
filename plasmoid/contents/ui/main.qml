@@ -7,7 +7,6 @@ import QtCore
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.plasma.plasmoid
-import org.kde.plasma.workspace.dbus as DBus
 import "logic.js" as Logic
 
 PlasmoidItem {
@@ -26,36 +25,27 @@ PlasmoidItem {
         return Logic.expandPath(configuredAccountHome, homeDir)
     }
 
-    readonly property bool isBound: resolvedAccountHome().trim() !== ""
-    property var snapshot: Logic.emptySnapshot()
     property int nowUnix: Math.floor(Date.now() / 1000)
     property real fxRate: 1.0
     property bool fxUsingUsdFallback: false
     property string fxNote: ""
 
-    // Replies from a superseded request or a previous Account Home are dropped.
-    property int snapshotRequestSeq: 0
+    readonly property bool isBound: snapshotSource.isBound
+    readonly property var snapshot: snapshotSource.snapshot
+    readonly property bool helperReachable: snapshotSource.helperReachable
+
+    // The reported windows are read against this, so a fresh snapshot deserves
+    // a fresh clock rather than waiting up to 30 s for the ticker.
+    onSnapshotChanged: nowUnix = Math.floor(Date.now() / 1000)
 
     readonly property string displayCurrency: Logic.effectiveCurrency(
         configuredCurrency,
         Qt.locale().name
     )
-    // DBusServiceWatcher.registered means "the service is running right now",
-    // not "the service can be started". The helper is D-Bus activated, so the
-    // first call is what starts it — refusing to call until it is registered
-    // means nothing ever starts it, and the widget sits on "Helper
-    // unavailable" for good. design.md:38 is explicit: the first widget call
-    // starts it, and a failed call is what maps to Unknown Allowance.
-    property bool helperReachable: true
-
-    onConfiguredAccountHomeChanged: updateSnapshot()
+    // The Account Home is bound through SnapshotSource.accountHome, whose own
+    // change handler refreshes; Plasma::Applet has no configurationChanged
+    // signal, which is what the mirrored properties above are for.
     onConfiguredCurrencyChanged: refreshFxRate()
-
-    DBus.DBusServiceWatcher {
-        id: helperWatcher
-        busType: DBus.BusType.Session
-        watchedService: "dev.codecap.Helper"
-    }
 
     Timer {
         interval: 30000
@@ -78,97 +68,14 @@ PlasmoidItem {
         return Qt.locale().firstDayOfWeek
     }
 
-    // Assigning the property fires the change signal; mutating the object
-    // afterwards does not, so every face has to be built before it is assigned.
-    function applyLocalFace(face) {
-        const next = Logic.emptySnapshot()
-        next.face = face
-        if (face !== "unbound") {
-            next.account_home = resolvedAccountHome()
-        }
-        snapshot = next
-    }
-
-    // A failed or unreadable call must not blank the popup. ADR 0006 keeps
-    // Last-Known Allowance visible with staleness shown.
-    function markSnapshotStale() {
-        const previous = root.snapshot
-        if (previous && previous.face === "ready") {
-            const next = Logic.normalizeSnapshot(previous)
-            next.session_allowance.stale = true
-            next.weekly_allowance.stale = true
-            snapshot = next
-            return
-        }
-        applyLocalFace("unknown_allowance")
-    }
-
-    function applySnapshotPayload(result) {
-        const payload = Logic.extractSnapshotPayload(result)
-        const parsed = Logic.parseSnapshot(payload)
-        if (parsed === null) {
-            // Unreadable helper output is Unknown Allowance, not Unbound. Say
-            // what arrived: the reply's shape is the only thing that identifies
-            // which case went unhandled, and a silent fallback here looked
-            // exactly like a helper that was not running.
-            console.warn("codecap: could not read the helper reply;",
-                         "outer:", Logic.describePayload(result),
-                         "unwrapped:", Logic.describePayload(payload))
-            markSnapshotStale()
-            return
-        }
-        snapshot = parsed
-        nowUnix = Math.floor(Date.now() / 1000)
-    }
-
-    function updateSnapshot() {
-        if (!isBound) {
-            applyLocalFace("unbound")
-            return
-        }
-
-        const home = resolvedAccountHome()
-        const seq = ++snapshotRequestSeq
-
-        DBus.SessionBus.asyncCall({
-            "service": "dev.codecap.Helper",
-            "path": "/dev/codecap/Helper",
-            "iface": "dev.codecap.Helper",
-            "member": "GetSnapshot",
-            // No signature on purpose. The library derives one from
-            // introspection, and dbusconnection.cpp builds it as
-            // '(' + types + ')' — the parenthesised struct form, as in the
-            // documented example "(u)" for a single uint32. Passing a bare
-            // "ssi" here made the encoder read only the first type and the
-            // call failed, which showed up as "Helper unavailable" while
-            // busctl worked fine. "(ssi)" is very likely correct and would
-            // save one round-trip per poll, but it cannot be tested without a
-            // Plasma session, and after phase 3 that round-trip costs nothing.
-            // An empty timezone means "the helper's own zone". Qt's JS engine
-            // has no Intl, so QML cannot produce an IANA id, and the display
-            // name it can produce resolves to UTC.
-            "arguments": [home, "", weekStart()]
-        }, function(result) {
-            if (seq !== root.snapshotRequestSeq || home !== root.resolvedAccountHome()) {
-                return
-            }
-            root.helperReachable = true
-            root.applySnapshotPayload(result)
-        }, function(failure) {
-            if (seq !== root.snapshotRequestSeq || home !== root.resolvedAccountHome()) {
-                return
-            }
-            // The call itself failing is the signal that the helper is not
-            // there — an activatable service that cannot be activated.
-            root.helperReachable = false
-            // Say why. A silent reject is what made "Helper unavailable" mean
-            // four different things at once.
-            console.warn("codecap: GetSnapshot failed:",
-                         failure && failure.error && failure.error.message
-                             ? failure.error.message
-                             : failure)
-            root.markSnapshotStale()
-        })
+    // Everything on the bus lives in SnapshotSource, which takes plain
+    // properties so that tests/plasmoid/qml-dbus can drive it against a stub
+    // helper. PlasmoidItem cannot be instantiated outside Plasma's applet
+    // machinery, so nothing that stays in this file can be executed by a test.
+    SnapshotSource {
+        id: snapshotSource
+        accountHome: root.resolvedAccountHome()
+        weekStart: root.weekStart()
     }
 
     function applyFxRate(rate, usingFallback) {
@@ -278,42 +185,7 @@ PlasmoidItem {
         }
     }
 
-    Component.onCompleted: {
-        refreshFxRate()
-        updateSnapshot()
-    }
-
-    DBus.SignalWatcher {
-        id: helperChangedWatcher
-        enabled: root.isBound
-        busType: DBus.BusType.Session
-        service: "dev.codecap.Helper"
-        path: "/dev/codecap/Helper"
-        iface: "dev.codecap.Helper"
-
-        // SignalWatcher has no receivedSignal signal: it looks up a function
-        // named "dbus" + the member name and calls it with the decoded
-        // arguments. Any other name is silently never called.
-        function dbusChanged(accountHome) {
-            if (accountHome === root.resolvedAccountHome()) {
-                root.updateSnapshot()
-            }
-        }
-    }
-
-    Timer {
-        interval: 30000
-        running: root.isBound
-        repeat: true
-        onTriggered: root.updateSnapshot()
-    }
-
-    Connections {
-        target: helperWatcher
-        function onRegisteredChanged() {
-            root.updateSnapshot()
-        }
-    }
+    Component.onCompleted: refreshFxRate()
 
     toolTipMainText: {
         if (!isBound) {

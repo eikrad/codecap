@@ -16,7 +16,9 @@ Finding IDs (`C-2`, `P-C1`, …) refer to the audit.
 | **1 · Make it work** | **Code done, not yet run on a Plasma 6 desktop.** See the caveat below. |
 | **2 · Stop the bleeding** | **Done.** One deviation from 2.1, recorded below. |
 | **3 · Move the work** | **Done**, except byte-level incremental parsing — see below. |
-| 4–6 | Not started. |
+| **5.2 · QML component tests** | **Done.** `tests/plasmoid/qml` and `tests/plasmoid/qml-plasma`. |
+| **5.3 · D-Bus harness** | **Written and wired; its assertions have never executed.** See below. |
+| 4, 6, rest of 5 | Not started. |
 
 **Reordered after real-desktop testing.** See the addendum in
 [`audit-2026-08-22.md`](./audit-2026-08-22.md). Phase 5.2 (a QML test harness) cost
@@ -72,6 +74,41 @@ refresh re-reads one file instead of forty — the numbers above. Byte-level off
 would cut the 27.8 ms case further but need care around truncation and rotation, and
 the current figure is already far below anything a user can perceive. Left as a
 follow-up rather than done badly.
+
+**Phase 5.3, and what it has not had.** `tests/plasmoid/qml-dbus` drives the
+applet's own `SnapshotSource` against a stub `dev.codecap.Helper`
+(`tests/helperstub`) on a private session bus, started by
+`scripts/run-qml-dbus-tests.sh` and reachable as `make test-plasmoid-qml-dbus`.
+Nine assertions cover `P-C2`, `P-M3`, `P-M4`, `P-M6` and the `C-1` timezone
+contract.
+
+Two things had to move for it to be possible. `SnapshotSource.qml` takes the bus
+half out of `main.qml`, because `PlasmoidItem` only works inside Plasma's applet
+machinery and so nothing left in that file can be instantiated by a test runner;
+and `localFaceSnapshot` / `staleSnapshot` moved from QML into `logic.js`, per the
+rule that testable logic does not live in `.qml`.
+
+Writing those tests found a live bug, which is the second time this has happened
+in this phase. `typeof [] === "object"`, so a helper reply of `[]` passed
+`parseSnapshot`'s guard, matched no face in `normalizeSnapshot`, and came back as
+the empty snapshot — whose face is `unbound`. An unreadable reply was therefore
+telling the user to go and choose an Account Home. `P-M6` again, by a route its
+original fix did not close.
+
+**None of the nine assertions has ever run.** `org.kde.plasma.workspace.dbus` is
+a Plasma 6 module, and neither CI nor any Plasma 5 distribution has it, so the
+suite skips itself with a printed reason. What *is* exercised on every PR is
+everything up to that skip: the stub building, taking the bus name, and the
+runner being invoked — the plasmoid CI job installs Go and D-Bus for exactly
+that. The stub itself has twelve Go tests over a real session bus, including one
+that fails if its introspection document stops being byte-for-byte the helper's.
+The QML suites are also in `make lint-qml` now, so a syntax error in a
+permanently-skipping suite cannot hide.
+
+**Run `make test-plasmoid-qml-dbus` on a Plasma 6 desktop before trusting the
+harness.** Until that has happened once, it is nine assertions written from the
+same reading of the platform as the code they test, which is the thing this
+phase exists to stop.
 
 **Coverage after phase 2** — `accounthome` 100 %, `usage` 80.5 %, `allowance` 77.8 %,
 `dbusapi` 72.3 %, `usagewatch` 66.7 %, `creds` 62.2 %. The poller went from 0 % to
@@ -259,14 +296,21 @@ files point at the right binary and `verify-install.sh` passes for both prefixes
 | # | Work | Finding |
 |---|---|---|
 | 5.1 | One golden snapshot fixture per face, generated from `internal/snapshot`, consumed by the Go tests, `logic.test.mjs`, **and** an assertion on `Export`'s introspection XML. Contract drift becomes impossible | `M-8`, `H-7` |
-| 5.2 | `qmltestrunner6` under `QT_QPA_PLATFORM=offscreen` for the pure components — `CompactRing` and `AllowanceBar` take only plain properties, so colour/visibility/geometry are testable with no D-Bus | `P-M · coverage` |
-| 5.3 | `dbus-run-session` + a stub `dev.codecap.Helper` driving `main.qml`. This is what covers the failure and partial-data faces | `P-C2`, `P-C3`, `P-H3`, `P-M3`–`P-M6` |
+| 5.2 | **Done.** `qmltestrunner6` under `QT_QPA_PLATFORM=offscreen` for the pure components — `CompactRing` and `AllowanceBar` take only plain properties, so colour/visibility/geometry are testable with no D-Bus | `P-M · coverage` |
+| 5.3 | **Written, never executed.** `dbus-run-session` + a stub `dev.codecap.Helper` driving `SnapshotSource`, which is `main.qml`'s bus half extracted so that a test runner can instantiate it at all. Covers the failure and partial-data faces. `P-C3` is *not* covered — the click-to-expand `MouseArea` needs the compact representation, which still cannot be instantiated outside an applet; see below | `P-C2`, `P-H3`, `P-M3`–`P-M6` |
 | 5.4 | Stop monkey-patching `Number.prototype.toLocaleString`; inject a formatting seam so the tests exercise real behaviour | `P-M7` |
 | 5.5 | Fuzz `FromUsagePayload` and `consumeReader` — both parse external JSON | `M-9` |
 | 5.6 | Table tests for the untested branches: `normalizeWeekStart` (22 %), `forModel` fallback (40 %), `parseExpiresAt` (25 %), `DefaultCacheRoot` (0 %) | `M-15`, `L-9` |
 | 5.7 | Nested-directory watch test — a `projects/<new>/` created *after* `Ensure`, which is the real refresh path when Claude Code starts a project | `M-9` |
 | 5.8 | Replace the package-level `stat`/`readFile` seams in `face` with injected dependencies; give `dbusapi.Export` constructor injection so it is testable at all | `M-14` |
 | 5.9 | Coverage threshold at 60 %, ratcheting. Only after the above — adding it first just cements today's number | `M-1` |
+
+**Still open in 5.3.** `P-C3`, the click-to-expand `MouseArea`, is the one item
+from the original scope that the harness does not reach: it lives in
+`compactRepresentation`, which only Plasma's applet machinery instantiates.
+Extracting it the way `SnapshotSource` was extracted would cover it, and is the
+obvious next step — but it is a second change to a file that has been verified on
+a desktop exactly once, and it was left out rather than bundled in unverified.
 
 ---
 
