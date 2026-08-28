@@ -16,7 +16,7 @@ Finding IDs (`C-2`, `P-C1`, …) refer to the audit.
 | **1 · Make it work** | **Code done, not yet run on a Plasma 6 desktop.** See the caveat below. |
 | **2 · Stop the bleeding** | **Done.** One deviation from 2.1, recorded below. |
 | **3 · Move the work** | **Done**, except byte-level incremental parsing — see below. |
-| **4 · Make it installable** | **Partial.** Service templating, systemd activation, PREFIX-aware verify/uninstall, Plasma 6 PKGBUILD and tray metadata are implemented. AUR publish still needs a tagged release tarball + pinned `sha256sums`; the package has not been installed and exercised on a Plasma 6 desktop. |
+| **4 · Make it installable** | **Partial.** Install/uninstall, D-Bus→systemd activation, crash restart, and tray placement verified on a Plasma 6 desktop (2026-08-27). AUR publish still needs a tagged release tarball + pinned `sha256sums`; tray auto-hide at the 80 % Session band not yet exercised on a `ready` face. |
 | **5.2 · QML component tests** | **Done.** `tests/plasmoid/qml` and `tests/plasmoid/qml-plasma`. |
 | **5.3 · D-Bus harness** | **Written and wired; its assertions have never executed.** See below. |
 | 6, rest of 5 | Not started. |
@@ -288,20 +288,16 @@ benchmark is in CI so a regression is visible.
 files point at the right binary and `verify-install.sh` passes for both prefixes; and
 `makepkg` builds, runs `check()`, and installs a package that resolves on Plasma 6.
 
-**Still open.** The code and the DESTDIR gate are in place; two things are not:
+**Still open.**
 
 1. **AUR integrity (4.5).** `PKGBUILD` still uses a local `make dist` tarball and
-   `sha256sums=('SKIP')`. Pinning a checksum needs a tagged GitHub release first —
-   switch `source=` to that archive and replace `SKIP` when publishing. Until then
-   the package is installable from a checkout, not from the AUR.
-2. **Plasma 6 desktop.** No one has yet installed this branch on a real session and
-   checked: D-Bus activation starts `codecap.service` (not a bare `Exec=` fork);
-   `systemctl --user status codecap.service` after the first widget call; a crash
-   restarts the helper; the applet can sit in the system tray and auto-hide below
-   80 % Session; `PREFIX=/usr/local` service files point at `/usr/local/bin/codecap`.
+   `sha256sums=('SKIP')`. Pinning a checksum needs a tagged GitHub release first.
+2. **Tray auto-hide at 80 %.** Verified on desktop 2026-08-27: install/uninstall/reinstall,
+   `codecap.service` activation via D-Bus, `kill -9` restart with a new PID, and tray
+   placement. Not yet checked: Passive → collapsed when Session &lt; 80 % on a `ready`
+   face (needs an authenticated Account Home).
 
-`make test-install` covers the layout and the negative gate. It cannot prove
-activation or tray behaviour.
+`make test-install` covers the layout and the negative gate.
 
 ---
 
