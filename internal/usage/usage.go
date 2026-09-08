@@ -100,19 +100,14 @@ func periodsAt(now time.Time, loc *time.Location, weekStart int32) periods {
 	}
 }
 
-// Compute aggregates Consumed Usage for an Account Home using DefaultRates.
+// computeAt is the cold-read seam the tests drive: a throwaway Cache, an
+// injected clock and an injected rate table.
 //
-// This builds a throwaway Cache, so it re-reads every log. Long-lived callers
-// should hold a Cache and call its Compute instead.
-func Compute(accountHome, timezone string, weekStart int32) (snapshot.ConsumedUsage, error) {
-	return ComputeWithRates(accountHome, timezone, weekStart, DefaultRates())
-}
-
-// ComputeWithRates is the List Price seam: callers can swap the published rate table.
-func ComputeWithRates(accountHome, timezone string, weekStart int32, rates Rates) (snapshot.ConsumedUsage, error) {
-	return computeAt(accountHome, timezone, weekStart, time.Now().UTC(), rates)
-}
-
+// The package exports no one-shot Compute. It had two — Compute and
+// ComputeWithRates — and nothing outside the package ever called either;
+// dbusapi holds a Cache, which is the whole point of having one, and the tests
+// need the clock this takes. Exported wrappers over a constructor plus a method
+// are surface, not seams.
 func computeAt(accountHome, timezone string, weekStart int32, now time.Time, rates Rates) (snapshot.ConsumedUsage, error) {
 	return NewCache(rates).computeAt(accountHome, timezone, weekStart, now)
 }

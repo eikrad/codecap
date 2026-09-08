@@ -107,7 +107,7 @@ func TestComputeDedupesRepeatedEventUUID(t *testing.T) {
 	}
 }
 
-func TestComputeWithRatesUsesCustomListPriceTable(t *testing.T) {
+func TestAListPriceFollowsTheRateTableItWasGiven(t *testing.T) {
 	accountHome := t.TempDir()
 	logDir := filepath.Join(accountHome, "projects", "sample")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {

@@ -119,6 +119,30 @@ self-consistent, not that it is right. Three tests in this repo asserted the bug
 behaviour as correct. For each new test: *if my understanding of the platform is
 wrong, does this test go red?* If not, it is documentation, not verification.
 
+### A handler reads its own input, never a value derived from it
+
+`ADR 0016`.
+
+QML bindings are push-based. Inside `onXChanged`, every binding that depends on
+`x` still holds its previous value, and reading one is reading stale state.
+
+```qml
+// No. isBound is a binding on accountHome, so this took the unbound branch
+// and the widget never called the helper at all.
+readonly property bool isBound: accountHome.trim() !== ""
+onAccountHomeChanged: refresh()
+function refresh() { if (!isBound) { applyLocalFace("unbound"); return } }
+```
+
+The same rule covers what a platform hands a handler. `SignalWatcher` decodes a
+`"s"` argument to `{value: "..."}`, not to a string, so `arg === accountHome`
+was false for every `Changed` the helper ever sent — the right handler name, and
+still no push. Decode explicitly in `logic.js` against a shape captured from a
+real bus, the way `extractSnapshotPayload` and `signalAccountHome` do.
+
+Neither of these is visible to `qmllint` or to the Node tests.
+`make test-plasmoid-qml-dbus` is the only gate that can see them.
+
 ### QML: build the object, then assign it once
 
 `P-H3`.
@@ -189,6 +213,12 @@ D-Bus code. It starts a private session bus and a stub `dev.codecap.Helper`
 (`tests/helperstub`), then drives the applet's own `SnapshotSource` against it.
 **Run it on the desktop after any change to `SnapshotSource.qml`.** In CI it
 gets as far as building the stub and taking the bus name, and then skips.
+
+`scripts/pre-pr-check.sh` runs all of that in one go and says which gates it
+could not run. A `PreToolUse` hook in `.claude/settings.json` runs it before
+`gh pr create` and blocks the PR if anything fails. It is not a substitute for
+CI: golangci-lint, shellcheck and reuse are frequently absent from a developer
+machine, and the script reports them as skipped rather than as passed.
 
 Green does not mean done. Also state, in the message you hand back:
 

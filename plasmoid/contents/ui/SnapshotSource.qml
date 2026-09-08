@@ -86,7 +86,14 @@ Item {
     }
 
     function refresh() {
-        if (!isBound) {
+        // Read accountHome, never isBound. isBound is a binding *on*
+        // accountHome, and QML bindings are push-based: when this runs from
+        // onAccountHomeChanged the binding has not been re-evaluated yet, so
+        // isBound is still the previous value. Binding an Account Home took
+        // this branch, sent no GetSnapshot at all, and left the widget on
+        // Unbound until the safety-net poll happened to fire up to 30 s later.
+        // tests/plasmoid/qml-dbus is what caught it; nothing else here can.
+        if (accountHome.trim() === "") {
             applyLocalFace("unbound")
             return
         }
@@ -157,8 +164,24 @@ Item {
         // arguments. Any other name is silently never called (finding P-C2) —
         // which is why tests/plasmoid/qml-dbus asserts a stub's Changed signal
         // moves the numbers here.
-        function dbusChanged(accountHome) {
-            if (accountHome === source.accountHome) {
+        //
+        // The argument is not a bare string. SignalWatcher decodes a "s" to
+        // {value: "..."}, so comparing it directly to accountHome was false for
+        // every signal the helper has ever sent — the right handler name, and
+        // still no push. signalAccountHome unwraps it.
+        function dbusChanged(argument) {
+            const home = Logic.signalAccountHome(argument)
+            if (home === null) {
+                // Say so rather than dropping it: an argument this code cannot
+                // read means it cannot tell whose Account Home changed, and a
+                // silently ignored push is what took 30 s off every update.
+                // Refreshing costs one call; not refreshing costs correctness.
+                console.warn("codecap: could not read the Changed argument;",
+                             Logic.describePayload(argument))
+                source.refresh()
+                return
+            }
+            if (home === source.accountHome) {
                 source.refresh()
             }
         }

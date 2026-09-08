@@ -7,7 +7,7 @@ SPDX-FileCopyrightText = "2026 eikrad <eikef.rades@protonmail.com>"
 SPDX-License-Identifier = "GPL-2.0-or-later"
 
 [[annotations]]
-path = [".gitignore", "go.mod"]
+path = [".gitignore", "go.mod", ".claude/settings.json"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 eikrad <eikef.rades@protonmail.com>"
 SPDX-License-Identifier = "GPL-2.0-or-later"

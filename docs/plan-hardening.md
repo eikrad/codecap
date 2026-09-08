@@ -18,8 +18,30 @@ Finding IDs (`C-2`, `P-C1`, …) refer to the audit.
 | **3 · Move the work** | **Done**, except byte-level incremental parsing — see below. |
 | **4 · Make it installable** | **Partial.** Install/uninstall, D-Bus→systemd activation, crash restart, and tray placement verified on a Plasma 6 desktop (2026-08-27). AUR publish still needs a tagged release tarball + pinned `sha256sums`; tray auto-hide at the 80 % Session band not yet exercised on a `ready` face. |
 | **5.2 · QML component tests** | **Done.** `tests/plasmoid/qml` and `tests/plasmoid/qml-plasma`. |
-| **5.3 · D-Bus harness** | **Written and wired; its assertions have never executed.** See below. |
+| **5.3 · D-Bus harness** | **Done and green (10/10).** Its first real run was 3/10; see below. |
 | 6, rest of 5 | Not started. |
+
+**What 5.3 found on its first run.** The harness had never executed. On the first
+machine that could run it, 7 of its 10 assertions failed, on two bugs that no other
+gate here can see and that both shipped:
+
+- `refresh()` read `isBound`, a binding on `accountHome`, from inside
+  `onAccountHomeChanged`. QML bindings are push-based, so it was still `false` and
+  binding an Account Home sent no `GetSnapshot` at all — the widget sat on Unbound
+  until the 30 s poll happened to fire.
+- `dbusChanged` compared its argument to `accountHome` with `===`. `SignalWatcher`
+  decodes a `"s"` to `{value: "..."}`, so the guard rejected every `Changed` the
+  helper has ever sent. ADR 0011 makes the push signal the primary update trigger;
+  in practice only the safety net has ever run.
+
+Both are the shape the audit kept finding: correct-looking code that no gate could
+contradict. [`adr/0016-qml-handlers-read-raw-inputs.md`](./adr/0016-qml-handlers-read-raw-inputs.md)
+records the rule. The suite is now 10/10 and runs in 3.4 s rather than 32.5 s — the
+old figure was four assertions waiting out their timeouts.
+
+**Still not verified on a real desktop.** The harness drives `SnapshotSource` on a
+private bus against a stub. It does not open a popup, and `main.qml` still cannot be
+instantiated by any test runner.
 
 **Reordered after real-desktop testing.** See the addendum in
 [`audit-2026-08-22.md`](./audit-2026-08-22.md). Phase 5.2 (a QML test harness) cost

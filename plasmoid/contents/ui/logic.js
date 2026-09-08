@@ -175,6 +175,28 @@ function extractSnapshotPayload(result) {
     return payload
 }
 
+// signalAccountHome reads the Account Home out of a Changed signal argument.
+//
+// SignalWatcher does not hand the handler a bare string. It decodes a "s"
+// argument to {value: "..."}, so `accountHome === source.accountHome` was false
+// for every signal the helper ever sent, with no warning and no error -- the
+// same shape extractSnapshotPayload exists to unwrap on the reply side, and the
+// same class of finding as P-C2. Verified against a real SignalWatcher on a
+// private session bus in tests/plasmoid/qml-dbus.
+//
+// Returns null when no string can be read at all. "" would be indistinguishable
+// from a genuinely empty Account Home, and the caller has to tell those apart.
+function signalAccountHome(argument) {
+    var value = argument
+    if (value && typeof value === "object" && !Array.isArray(value) && value.value !== undefined) {
+        value = value.value
+    }
+    if (Array.isArray(value)) {
+        value = value.length > 0 ? value[0] : undefined
+    }
+    return typeof value === "string" ? value : null
+}
+
 // describePayload is for the log line when a reply cannot be read: the shape is
 // the only thing that identifies which of the cases above went unhandled.
 function describePayload(value) {

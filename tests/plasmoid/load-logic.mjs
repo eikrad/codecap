@@ -23,6 +23,7 @@ export function loadLogic() {
             normalizeSnapshot,
             parseSnapshot,
             extractSnapshotPayload,
+            signalAccountHome,
             describePayload,
             localFaceSnapshot,
             staleSnapshot,

@@ -172,13 +172,19 @@ check-version:
 	fi
 	@echo "version ok: $(VERSION)"
 
-# gofmt walks whatever it is pointed at. `.` includes a GOCACHE or GOMODCACHE
-# someone parked inside the checkout — hundreds of megabytes of upstream Go
-# source, some of it deliberately unformatted parser testdata, none of it ours.
-# The dot-directory prune also covers .git and the DESTDIR staging trees.
+# GO_SOURCE_DIRS, not `.` and not a find over the tree. gofmt walks whatever it
+# is pointed at, and `.` includes a GOCACHE or GOMODCACHE parked inside the
+# checkout (.gocache/ here) -- hundreds of megabytes of upstream Go source, some
+# of it deliberately unformatted parser testdata, none of it ours.
+#
+# main solved this by pruning dot-directories. That misses src/ and pkg/, which
+# makepkg creates in the repo root and which hold a whole second copy of the
+# tree -- both are in .gitignore and excluded from `dist` for the same reason.
+# Naming the three directories that hold our Go source has no such hole.
+GO_SOURCE_DIRS := cmd internal tests
+
 fmt-check:
-	@files="$$(find . -type d -name '.?*' -prune -o -type f -name '*.go' -print)"; \
-	unformatted="$$(gofmt -l $$files)"; \
+	@unformatted="$$(gofmt -l $(GO_SOURCE_DIRS))"; \
 	if [ -n "$$unformatted" ]; then \
 		echo "gofmt needed:"; echo "$$unformatted"; \
 		gofmt -d $$unformatted; \
@@ -192,8 +198,24 @@ lint-go: fmt-check
 lint-sh:
 	shellcheck -s sh scripts/*.sh
 
+# Any output at all is a failure. qmllint exits 0 no matter what it printed:
+# the branch that added a duplicate resolvedAccountHome() to main.qml had
+# qmllint reporting `duplicated-name` on every run while `make lint` stayed
+# green. A gate that reports and does not fail is not a gate.
+#
+# Checking the output rather than passing --max-warnings 0, which is the
+# obvious fix and works on exactly one of the two qmllint builds this repo is
+# linted by: the option does not exist on the Qt 6 that CI's
+# qt6-declarative-dev-tools ships, and an unknown option makes qmllint reject
+# the whole invocation. Both builds are silent when they find nothing, so
+# "printed anything" is the version-independent signal.
 lint-qml:
-	$(QMLLINT) $(QMLLINT_FLAGS) $(QML_SOURCES)
+	@out=$$($(QMLLINT) $(QMLLINT_FLAGS) $(QML_SOURCES) 2>&1); status=$$?; \
+	if [ -n "$$out" ]; then printf '%s\n' "$$out"; fi; \
+	if [ -n "$$out" ] || [ "$$status" -ne 0 ]; then \
+		echo "lint-qml: qmllint reported the above. Warnings fail this gate."; \
+		exit 1; \
+	fi
 
 lint: lint-go lint-sh lint-qml
 
