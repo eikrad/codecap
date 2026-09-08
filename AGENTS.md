@@ -214,6 +214,12 @@ D-Bus code. It starts a private session bus and a stub `dev.codecap.Helper`
 **Run it on the desktop after any change to `SnapshotSource.qml`.** In CI it
 gets as far as building the stub and taking the bus name, and then skips.
 
+`scripts/pre-pr-check.sh` runs all of that in one go and says which gates it
+could not run. A `PreToolUse` hook in `.claude/settings.json` runs it before
+`gh pr create` and blocks the PR if anything fails. It is not a substitute for
+CI: golangci-lint, shellcheck and reuse are frequently absent from a developer
+machine, and the script reports them as skipped rather than as passed.
+
 Green does not mean done. Also state, in the message you hand back:
 
 - **what you could not verify, and why.** No Plasma session, no session bus, no real
