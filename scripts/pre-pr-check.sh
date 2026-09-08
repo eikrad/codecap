@@ -49,6 +49,21 @@ echo "Running the CI gates locally (see .github/workflows/ci.yml)"
 
 run fmt-check    ''             make fmt-check
 run go-vet       ''             go vet ./...
+# golangci-lint is the only gate CI pins to an exact version, and a local build
+# that differs reports checks CI does not have or misses ones it does. That is
+# how a locally green tree fails CI -- and how a locally red tree turns out to
+# be fine, which is what a v2.13.2 here against a v2.5.0 pin produced. The pin
+# is read from the workflow rather than restated, so the two cannot drift apart.
+if command -v golangci-lint >/dev/null 2>&1; then
+	pinned=$(sed -n 's,.*golangci-lint/v2/cmd/golangci-lint@v\([0-9.]*\).*,\1,p' \
+		.github/workflows/ci.yml | head -n 1)
+	installed=$(golangci-lint --version 2>/dev/null \
+		| sed -n 's/.*version \([0-9][0-9.]*\) .*/\1/p' | head -n 1)
+	if [ -n "$pinned" ] && [ -n "$installed" ] && [ "$pinned" != "$installed" ]; then
+		echo "WARN  golangci is $installed here, CI pins $pinned -- results may differ"
+		skipped="$skipped golangci-version($installed!=$pinned)"
+	fi
+fi
 run golangci     golangci-lint  golangci-lint run ./...
 run lint-sh      shellcheck     make lint-sh
 run lint-qml     ''             make lint-qml
