@@ -138,12 +138,24 @@ lint-go: fmt-check
 lint-sh:
 	shellcheck -s sh scripts/*.sh
 
-# -W 0 makes any warning fail. Without it qmllint exits 0 no matter what it
-# printed: the branch that added a duplicate resolvedAccountHome() to main.qml
-# had qmllint reporting `duplicated-name` on every run while `make lint` stayed
+# Any output at all is a failure. qmllint exits 0 no matter what it printed:
+# the branch that added a duplicate resolvedAccountHome() to main.qml had
+# qmllint reporting `duplicated-name` on every run while `make lint` stayed
 # green. A gate that reports and does not fail is not a gate.
+#
+# Checking the output rather than passing --max-warnings 0, which is the
+# obvious fix and works on exactly one of the two qmllint builds this repo is
+# linted by: the option does not exist on the Qt 6 that CI's
+# qt6-declarative-dev-tools ships, and an unknown option makes qmllint reject
+# the whole invocation. Both builds are silent when they find nothing, so
+# "printed anything" is the version-independent signal.
 lint-qml:
-	$(QMLLINT) $(QMLLINT_FLAGS) --max-warnings 0 $(QML_SOURCES)
+	@out=$$($(QMLLINT) $(QMLLINT_FLAGS) $(QML_SOURCES) 2>&1); status=$$?; \
+	if [ -n "$$out" ]; then printf '%s\n' "$$out"; fi; \
+	if [ -n "$$out" ] || [ "$$status" -ne 0 ]; then \
+		echo "lint-qml: qmllint reported the above. Warnings fail this gate."; \
+		exit 1; \
+	fi
 
 lint: lint-go lint-sh lint-qml
 
