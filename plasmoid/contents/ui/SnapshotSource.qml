@@ -86,7 +86,14 @@ Item {
     }
 
     function refresh() {
-        if (!isBound) {
+        // Read accountHome, never isBound. isBound is a binding *on*
+        // accountHome, and QML bindings are push-based: when this runs from
+        // onAccountHomeChanged the binding has not been re-evaluated yet, so
+        // isBound is still the previous value. Binding an Account Home took
+        // this branch, sent no GetSnapshot at all, and left the widget on
+        // Unbound until the safety-net poll happened to fire up to 30 s later.
+        // tests/plasmoid/qml-dbus is what caught it; nothing else here can.
+        if (accountHome.trim() === "") {
             applyLocalFace("unbound")
             return
         }
