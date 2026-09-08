@@ -16,7 +16,7 @@ Finding IDs (`C-2`, `P-C1`, …) refer to the audit.
 | **1 · Make it work** | **Code done, not yet run on a Plasma 6 desktop.** See the caveat below. |
 | **2 · Stop the bleeding** | **Done.** One deviation from 2.1, recorded below. |
 | **3 · Move the work** | **Done**, except byte-level incremental parsing — see below. |
-| **4 · Make it installable** | **Partial.** Install/uninstall, D-Bus→systemd activation, crash restart, and tray placement verified on a Plasma 6 desktop (2026-08-27). AUR publish still needs a tagged release tarball + pinned `sha256sums`; tray auto-hide at the 80 % Session band not yet exercised on a `ready` face. |
+| **4 · Make it installable** | **Done bar the AUR checksum.** Install/uninstall, D-Bus→systemd activation, crash restart, tray placement and tray auto-hide at the 80 % Session band all verified on a Plasma 6 desktop. Pinning `sha256sums` needs a tagged release to exist first. |
 | **5.2 · QML component tests** | **Done.** `tests/plasmoid/qml` and `tests/plasmoid/qml-plasma`. |
 | **5.3 · D-Bus harness** | **Done and green (10/10).** Its first real run was 3/10; see below. |
 | 6, rest of 5 | Not started. |
@@ -310,14 +310,21 @@ benchmark is in CI so a regression is visible.
 files point at the right binary and `verify-install.sh` passes for both prefixes; and
 `makepkg` builds, runs `check()`, and installs a package that resolves on Plasma 6.
 
-**Still open.**
+**Still open: AUR integrity (4.5).** `PKGBUILD` still uses a local `make dist`
+tarball and `sha256sums=('SKIP')`. Pinning a checksum needs a tagged GitHub
+release first — there is no published artifact to hash until then. Once `v0.2.0`
+is tagged it is a two-line swap (the real `source=` is already in the file,
+commented out at `PKGBUILD:23`), and 4.6's `check-version` gate already asserts
+`pkgver` matches `metadata.json`.
 
-1. **AUR integrity (4.5).** `PKGBUILD` still uses a local `make dist` tarball and
-   `sha256sums=('SKIP')`. Pinning a checksum needs a tagged GitHub release first.
-2. **Tray auto-hide at 80 %.** Verified on desktop 2026-08-27: install/uninstall/reinstall,
-   `codecap.service` activation via D-Bus, `kill -9` restart with a new PID, and tray
-   placement. Not yet checked: Passive → collapsed when Session &lt; 80 % on a `ready`
-   face (needs an authenticated Account Home).
+**Verified on a Plasma 6 desktop.** 2026-08-27: install/uninstall/reinstall,
+`codecap.service` activation via D-Bus, `kill -9` restart with a new PID, tray
+placement. 2026-09-08: tray auto-hide across the 80 % Session band on a `ready`
+face — the entry stays collapsed below 80 % and appears at it, which is
+`trayStatus` returning `passive` then `active`. That was the last item needing an
+authenticated Account Home, and no gate in this repo can assert it: `trayStatus`
+is unit-tested at every band, but whether `Plasmoid.status` actually drives KDE's
+auto-hide is a Plasma fact, observable only on a desktop.
 
 `make test-install` covers the layout and the negative gate.
 
