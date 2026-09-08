@@ -390,3 +390,27 @@ test("a reply that cannot be parsed is what drives staleSnapshot", () => {
     const parsed = Logic.parseSnapshot(Logic.extractSnapshotPayload(['{"face":"ready"}']));
     assert.equal(parsed.face, "ready");
 });
+
+// The Changed signal is the applet's primary update trigger (ADR 0011), and it
+// never fired: SignalWatcher decodes a "s" argument to {value: "..."}, not to a
+// bare string, so `arg === source.accountHome` was false for every emit. The
+// verbatim shape is from a real SignalWatcher on a private session bus --
+// JSON.stringify of the argument printed {"value":"/tmp/codecap-harness/a"}.
+test("signalAccountHome unwraps what SignalWatcher actually delivers", () => {
+    assert.equal(Logic.signalAccountHome({ value: "/home/me/.claude" }), "/home/me/.claude");
+    // A bare string is what anyone would assume, and must keep working.
+    assert.equal(Logic.signalAccountHome("/home/me/.claude"), "/home/me/.claude");
+    assert.equal(Logic.signalAccountHome(["/home/me/.claude"]), "/home/me/.claude");
+    assert.equal(Logic.signalAccountHome({ value: ["/home/me/.claude"] }), "/home/me/.claude");
+    assert.equal(Logic.signalAccountHome(""), "");
+});
+
+test("signalAccountHome says it cannot read the argument rather than guessing", () => {
+    // null, not "": an Account Home that cannot be read is not the same thing
+    // as one that is empty, and the caller has to be able to tell the two
+    // apart to decide whether refreshing is safe.
+    assert.equal(Logic.signalAccountHome(undefined), null);
+    assert.equal(Logic.signalAccountHome(null), null);
+    assert.equal(Logic.signalAccountHome({ value: 42 }), null);
+    assert.equal(Logic.signalAccountHome([]), null);
+});

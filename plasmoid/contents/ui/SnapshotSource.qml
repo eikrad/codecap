@@ -164,8 +164,24 @@ Item {
         // arguments. Any other name is silently never called (finding P-C2) —
         // which is why tests/plasmoid/qml-dbus asserts a stub's Changed signal
         // moves the numbers here.
-        function dbusChanged(accountHome) {
-            if (accountHome === source.accountHome) {
+        //
+        // The argument is not a bare string. SignalWatcher decodes a "s" to
+        // {value: "..."}, so comparing it directly to accountHome was false for
+        // every signal the helper has ever sent — the right handler name, and
+        // still no push. signalAccountHome unwraps it.
+        function dbusChanged(argument) {
+            const home = Logic.signalAccountHome(argument)
+            if (home === null) {
+                // Say so rather than dropping it: an argument this code cannot
+                // read means it cannot tell whose Account Home changed, and a
+                // silently ignored push is what took 30 s off every update.
+                // Refreshing costs one call; not refreshing costs correctness.
+                console.warn("codecap: could not read the Changed argument;",
+                             Logic.describePayload(argument))
+                source.refresh()
+                return
+            }
+            if (home === source.accountHome) {
                 source.refresh()
             }
         }
