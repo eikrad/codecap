@@ -4,7 +4,17 @@ v1 sequence. Domain is [`CONTEXT.md`](../CONTEXT.md); architecture and visual ar
 
 Each phase should be runnable on this machine before the next starts. Phase 4 may begin once phase 1’s snapshot JSON is real.
 
-Phases 0–5 are implemented on `main`. Optional follow-ups: AUR publish, Get New Widgets packaging.
+Phases 0–5 are implemented on `main`. Optional follow-ups: AUR publish, Get New
+Widgets packaging.
+
+**AUR publish is blocked externally, not unfinished.** `PKGBUILD` builds from the
+pinned v0.2.0 release archive and `makepkg -si` works from the file alone, so the
+packaging half is done. Uploading needs an AUR account, and AUR registration was
+closed as of 2026-09-08. Nothing in this repository unblocks it.
+
+That makes **Get New Widgets the live distribution path**: its stated precondition
+here — "a documented helper install for non-Arch (release tarball is enough)" — is
+met as of the v0.2.0 release, which the README now documents.
 
 A full-tree audit on 2026-08-22 found that several of those phases are implemented but not
 working. Findings: [`audit-2026-08-22.md`](./audit-2026-08-22.md). Order of work to close them:

@@ -320,7 +320,9 @@ plus the Go suite — on the way. On each version bump: change `pkgver`, then
 
 Uploading to the AUR is a separate step and is not tracked here: it needs an AUR
 account and an SSH key, and pushes this `PKGBUILD` plus a `.SRCINFO` to
-`ssh://aur@aur.archlinux.org/codecap.git`.
+`ssh://aur@aur.archlinux.org/codecap.git`. **AUR registration was closed as of
+2026-09-08**, so that step is blocked on something outside this repository. The
+package itself builds and installs from the `PKGBUILD` alone in the meantime.
 
 **Verified on a Plasma 6 desktop.** 2026-08-27: install/uninstall/reinstall,
 `codecap.service` activation via D-Bus, `kill -9` restart with a new PID, tray
