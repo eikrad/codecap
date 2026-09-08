@@ -345,7 +345,7 @@ auto-hide is a Plasma fact, observable only on a desktop.
 |---|---|---|
 | 5.1 | One golden snapshot fixture per face, generated from `internal/snapshot`, consumed by the Go tests, `logic.test.mjs`, **and** an assertion on `Export`'s introspection XML. Contract drift becomes impossible | `M-8`, `H-7` |
 | 5.2 | **Done.** `qmltestrunner6` under `QT_QPA_PLATFORM=offscreen` for the pure components — `CompactRing` and `AllowanceBar` take only plain properties, so colour/visibility/geometry are testable with no D-Bus | `P-M · coverage` |
-| 5.3 | **Written, never executed.** `dbus-run-session` + a stub `dev.codecap.Helper` driving `SnapshotSource`, which is `main.qml`'s bus half extracted so that a test runner can instantiate it at all. Covers the failure and partial-data faces. `P-C3` is *not* covered — the click-to-expand `MouseArea` needs the compact representation, which still cannot be instantiated outside an applet; see below | `P-C2`, `P-H3`, `P-M3`–`P-M6` |
+| 5.3 | **Done, 10/10.** `dbus-run-session` + a stub `dev.codecap.Helper` driving `SnapshotSource`, which is `main.qml`'s bus half extracted so that a test runner can instantiate it at all. Covers the failure and partial-data faces. `P-C3` is covered since the compact representation was extracted as `CompactFace`; see below | `P-C2`, `P-H3`, `P-M3`–`P-M6` |
 | 5.4 | Stop monkey-patching `Number.prototype.toLocaleString`; inject a formatting seam so the tests exercise real behaviour | `P-M7` |
 | 5.5 | Fuzz `FromUsagePayload` and `consumeReader` — both parse external JSON | `M-9` |
 | 5.6 | Table tests for the untested branches: `normalizeWeekStart` (22 %), `forModel` fallback (40 %), `parseExpiresAt` (25 %), `DefaultCacheRoot` (0 %) | `M-15`, `L-9` |
@@ -353,12 +353,19 @@ auto-hide is a Plasma fact, observable only on a desktop.
 | 5.8 | Replace the package-level `stat`/`readFile` seams in `face` with injected dependencies; give `dbusapi.Export` constructor injection so it is testable at all | `M-14` |
 | 5.9 | Coverage threshold at 60 %, ratcheting. Only after the above — adding it first just cements today's number | `M-1` |
 
-**Still open in 5.3.** `P-C3`, the click-to-expand `MouseArea`, is the one item
-from the original scope that the harness does not reach: it lives in
-`compactRepresentation`, which only Plasma's applet machinery instantiates.
-Extracting it the way `SnapshotSource` was extracted would cover it, and is the
-obvious next step — but it is a second change to a file that has been verified on
-a desktop exactly once, and it was left out rather than bundled in unverified.
+**5.3's last gap, closed.** `P-C3`, the click-to-expand `MouseArea`, was the one
+item from the original scope the harness did not reach: it lived in
+`compactRepresentation`, which only Plasma's applet machinery instantiates. It is
+now `CompactFace`, extracted the way `SnapshotSource` was, and
+`tests/plasmoid/qml-plasma/tst_compactface.qml` delivers a real click to it.
+
+All four criticals of 2026-08-22 now have a gate that executes them.
+
+Two things the extraction does not cover, both by construction. `onActivated:
+root.expanded = !root.expanded` stays in `main.qml`, because `expanded` is a
+PlasmoidItem property — one line, still unexecutable by any test. And the panel
+is what sizes the representation, so a click landing on it in a real panel is
+still a desktop check.
 
 ---
 
