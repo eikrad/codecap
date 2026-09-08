@@ -62,12 +62,18 @@ TestCase {
         // folder silently did nothing. stripFileScheme is the conversion.
         var u = Qt.url("file:///home/me/.claude")
         compare(typeof u, "object")
-        // The missing property is the assertion. qmllint resolves QUrl, so it
-        // reports the very absence this line exists to prove — and with
-        // --max-warnings 0 that would fail the build for being right.
-        // qmllint disable missing-property
-        compare(typeof u.toLocalFile, "undefined")
-        // qmllint enable missing-property
+        // The member name goes through a variable so qmllint cannot resolve it
+        // statically. The missing property IS the assertion here, and qmllint
+        // resolves QUrl well enough to report the very absence this line exists
+        // to prove -- which the lint gate then fails on for being right. The
+        // runtime check is unchanged; only the static analysis is opted out of.
+        //
+        // A `// qmllint disable missing-property` directive is not the way out.
+        // That category does not exist on the older qmllint CI runs, and it
+        // warns about the unknown category in the directive instead -- so the
+        // suppression itself failed the gate.
+        var member = "toLocalFile"
+        compare(typeof u[member], "undefined")
         compare(Logic.stripFileScheme(u), "/home/me/.claude")
     }
 
