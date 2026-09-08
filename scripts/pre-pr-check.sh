@@ -52,7 +52,17 @@ run go-vet       ''             go vet ./...
 run golangci     golangci-lint  golangci-lint run ./...
 run lint-sh      shellcheck     make lint-sh
 run lint-qml     ''             make lint-qml
-run reuse        reuse          reuse lint
+# CI runs `pipx run reuse lint`. reuse is the one gate here written in Python,
+# so an ephemeral run of it is the same thing pipx does in CI -- unpinned latest
+# on both sides. uv is checked second because a system reuse is what a developer
+# who installed one expects to be tested against.
+if command -v reuse >/dev/null 2>&1; then
+	run reuse '' reuse lint
+elif command -v uv >/dev/null 2>&1; then
+	run reuse '' uv tool run reuse lint
+else
+	run reuse reuse reuse lint
+fi
 run test         ''             make test
 run test-install ''             make test-install
 
