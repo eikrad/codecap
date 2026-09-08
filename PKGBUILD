@@ -9,21 +9,39 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/eikrad/codecap"
 license=('GPL-2.0-or-later')
 depends=(
-  'plasma-framework'
+  'libplasma'
+  'plasma-workspace'
+  'kirigami'
+  'dbus'
 )
 makedepends=(
   'go'
 )
 options=('!strip')
-source=()
-sha256sums=()
+# Local tarball from `make dist`. When publishing to the AUR, switch to the
+# GitHub release archive and replace SKIP with the pinned checksum:
+#   source=("$pkgname-$pkgver.tar.gz::https://github.com/eikrad/codecap/archive/v$pkgver.tar.gz")
+#   sha256sums=('…')
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP')
 
 build() {
-  cd "$startdir"
+  cd "$srcdir/$pkgname-$pkgver"
+  export CGO_ENABLED=0
   make build
 }
 
+check() {
+  cd "$srcdir/$pkgname-$pkgver"
+  make check-version
+  if command -v dbus-run-session >/dev/null 2>&1; then
+    dbus-run-session -- go test ./...
+  else
+    go test ./...
+  fi
+}
+
 package() {
-  cd "$startdir"
-  make install DESTDIR="$pkgdir"
+  cd "$srcdir/$pkgname-$pkgver"
+  make install DESTDIR="$pkgdir" PREFIX=/usr
 }

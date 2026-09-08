@@ -5,6 +5,7 @@
 set -eu
 
 ROOT="$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)"
+PREFIX="${PREFIX:-/usr}"
 LOCAL_PLASMOID="$HOME/.local/share/plasma/plasmoids/dev.codecap.plasmoid"
 
 cd "$ROOT"
@@ -12,8 +13,18 @@ cd "$ROOT"
 echo "Building codecap helper..."
 make build
 
-echo "Installing system-wide (sudo required)..."
-sudo make install
+echo "Installing into $PREFIX (sudo required)..."
+sudo make install PREFIX="$PREFIX"
+
+# systemd caches the unit tree per user manager. Without a reload it does not
+# know codecap.service exists until the next login, so the D-Bus activation
+# that SystemdService= points at fails for the rest of this session — which
+# looks exactly like the helper being broken.
+if command -v systemctl >/dev/null 2>&1; then
+	if ! systemctl --user daemon-reload; then
+		echo "WARNING: systemd user units could not be reloaded; re-login before using codecap." >&2
+	fi
+fi
 
 # The helper stays up for the graphical session (ADR 0015), so installing a new
 # binary leaves the old process serving until logout. Stop it; the next widget
@@ -25,12 +36,20 @@ if command -v pkill >/dev/null 2>&1; then
 fi
 
 if [ -d "$LOCAL_PLASMOID" ]; then
-	echo "Removing user-local plasmoid (system install uses /usr/share)..."
-	if command -v kpackagetool6 >/dev/null 2>&1; then
-		kpackagetool6 --type Plasma/Applet --remove dev.codecap.plasmoid
-	else
-		rm -rf "$LOCAL_PLASMOID"
-	fi
+	printf "Remove user-local plasmoid at %s so the system package is used? [y/N] " "$LOCAL_PLASMOID"
+	read -r answer
+	case "$answer" in
+	y | Y | yes | YES)
+		if command -v kpackagetool6 >/dev/null 2>&1; then
+			kpackagetool6 --type Plasma/Applet --remove dev.codecap.plasmoid
+		else
+			rm -rf -- "$LOCAL_PLASMOID"
+		fi
+		;;
+	*)
+		echo "Keeping $LOCAL_PLASMOID (it shadows the system install)"
+		;;
+	esac
 fi
 
 cat <<EOF
@@ -48,4 +67,7 @@ Helper check:
 
 Plasmoid-only dev updates (after this install):
   ./scripts/install-plasmoid.sh
+
+To remove later:
+  ./scripts/uninstall.sh
 EOF
