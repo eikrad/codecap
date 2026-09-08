@@ -42,15 +42,17 @@ List Price is estimated at published API token rates (USD in the helper). The wi
 
 ### Arch / Manjaro (recommended)
 
-From a clone of this repository:
+`PKGBUILD` builds from the published release archive and verifies it against a
+pinned checksum, so it needs nothing else from this repository:
 
 ```bash
-git clone https://github.com/eikrad/codecap.git
-cd codecap
-make dist          # writes codecap-<version>.tar.gz for the PKGBUILD
-makepkg -fd
-sudo pacman -U codecap-*.pkg.tar.zst
+curl -O https://raw.githubusercontent.com/eikrad/codecap/main/PKGBUILD
+makepkg -si
 ```
+
+This builds the **released** version, not your working tree — `makepkg` downloads
+the tagged tarball rather than using the directory it runs in. To package what
+you are actually working on, use `./scripts/install.sh` below.
 
 Or install directly from a clone (helper + plasmoid + D-Bus + systemd in one step):
 
@@ -94,7 +96,20 @@ go run ./cmd/codecap
 
 ### Other distros
 
-Packaging for Debian/Fedora is not shipped yet. The helper layout is standard FHS; a future release tarball will document manual install. The plasmoid is a normal Plasma 6 KPackage once the helper is on `PATH` and D-Bus activation works.
+Packaging for Debian/Fedora is not shipped yet. The helper layout is standard FHS, so
+a manual install works from the [release tarball](https://github.com/eikrad/codecap/releases):
+
+```bash
+curl -L https://github.com/eikrad/codecap/archive/v0.2.0.tar.gz | tar xz
+cd codecap-0.2.0
+make build
+sudo make install PREFIX=/usr/local
+systemctl --user daemon-reload
+```
+
+That needs Go to build the helper, and Plasma 6 to run the widget — see
+[Requirements](#requirements). The plasmoid is a normal Plasma 6 KPackage once the
+helper is on `PATH` and D-Bus activation works.
 
 ## Configure the widget
 

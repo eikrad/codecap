@@ -18,12 +18,16 @@ makedepends=(
   'go'
 )
 options=('!strip')
-# Local tarball from `make dist`. When publishing to the AUR, switch to the
-# GitHub release archive and replace SKIP with the pinned checksum:
-#   source=("$pkgname-$pkgver.tar.gz::https://github.com/eikrad/codecap/archive/v$pkgver.tar.gz")
-#   sha256sums=('…')
-source=("$pkgname-$pkgver.tar.gz")
-sha256sums=('SKIP')
+# The GitHub release archive for the v$pkgver tag, pinned. makepkg fetches and
+# verifies it, so this builds on a machine that has never seen this repository —
+# which a local `make dist` tarball with sha256sums=('SKIP') could not do, and
+# which the AUR requires.
+#
+# On every version bump: change pkgver, then run `updpkgsums` to refresh the
+# checksum. `make check-version` (run from check() below) fails the build if
+# pkgver and plasmoid/metadata.json disagree.
+source=("$pkgname-$pkgver.tar.gz::https://github.com/eikrad/codecap/archive/v$pkgver.tar.gz")
+sha256sums=('755f2d5385be280fb252b65492668a2247d2080a6cad4f814b84b02089db5882')
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"
