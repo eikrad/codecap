@@ -414,3 +414,20 @@ test("signalAccountHome says it cannot read the argument rather than guessing", 
     assert.equal(Logic.signalAccountHome({ value: 42 }), null);
     assert.equal(Logic.signalAccountHome([]), null);
 });
+
+test("trayStatus keeps faces that need the user visible", () => {
+    // P-M14: without a status binding the tray entry is always Active and can
+    // never auto-hide. Unbound / Signed Out need the user; a calm Session does not.
+    assert.equal(Logic.trayStatus("unbound", 0, false), "needsAttention");
+    assert.equal(Logic.trayStatus("signed_out", 0, false), "needsAttention");
+    assert.equal(Logic.trayStatus("unknown_allowance", 0, false), "active");
+});
+
+test("trayStatus follows the Session 80% band on the ready face", () => {
+    assert.equal(Logic.trayStatus("ready", 0, false), "passive");
+    assert.equal(Logic.trayStatus("ready", 79, false), "passive");
+    assert.equal(Logic.trayStatus("ready", 80, false), "active");
+    assert.equal(Logic.trayStatus("ready", 99, false), "active");
+    assert.equal(Logic.trayStatus("ready", 100, false), "needsAttention");
+    assert.equal(Logic.trayStatus("ready", 10, true), "needsAttention");
+});

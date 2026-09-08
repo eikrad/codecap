@@ -326,6 +326,27 @@ function allowanceFillColor(usedPercent, stale, colors) {
     return colors.highlight
 }
 
+// Tray auto-hide (Plasma::Types::ItemStatus). Returns a stable name that QML
+// maps onto PlasmaCore.Types — logic.js cannot import Plasma modules, and
+// keeping the decision here is what lets CI assert the 80% band without a
+// desktop. Faces that need the user to act stay visible; a calm Session can
+// hide. Finding P-M14.
+function trayStatus(face, usedPercent, stale) {
+    if (face === "unbound" || face === "signed_out") {
+        return "needsAttention"
+    }
+    if (face !== "ready") {
+        return "active"
+    }
+    if (stale || usedPercent >= 100) {
+        return "needsAttention"
+    }
+    if (usedPercent >= 80) {
+        return "active"
+    }
+    return "passive"
+}
+
 function localeCurrencyCode(localeName) {
     var map = {
         "da_DK": "DKK",

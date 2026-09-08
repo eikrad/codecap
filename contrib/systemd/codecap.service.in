@@ -1,9 +1,13 @@
 [Unit]
 Description=codecap session helper
+PartOf=graphical-session.target
 
 [Service]
 Type=dbus
 BusName=dev.codecap.Helper
-ExecStart=/usr/bin/codecap
+ExecStart=@BINDIR@/codecap
 Restart=on-failure
 RestartSec=2
+
+[Install]
+WantedBy=default.target

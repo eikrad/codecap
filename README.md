@@ -47,6 +47,7 @@ From a clone of this repository:
 ```bash
 git clone https://github.com/eikrad/codecap.git
 cd codecap
+make dist          # writes codecap-<version>.tar.gz for the PKGBUILD
 makepkg -fd
 sudo pacman -U codecap-*.pkg.tar.zst
 ```
@@ -59,18 +60,28 @@ cd codecap
 ./scripts/install.sh
 ```
 
-Equivalent manual install:
+Equivalent manual install (build as your user, then install — never `sudo make install` alone before `make build`):
 
 ```bash
+make build
 sudo make install
 ```
 
+`PREFIX` is honoured end-to-end: both service files are templated at install time, so `sudo make install PREFIX=/usr/local` activates `/usr/local/bin/codecap`. Both scripts take it from the environment — `PREFIX=/usr/local ./scripts/install.sh`, and the same value when you later uninstall.
+
 This installs:
 
-- `/usr/bin/codecap` — session helper
-- D-Bus activation for `dev.codecap.Helper`
-- User systemd unit `codecap.service`
-- Plasmoid under `/usr/share/plasma/plasmoids/dev.codecap.plasmoid/`
+- `$PREFIX/bin/codecap` — session helper
+- D-Bus activation for `dev.codecap.Helper` (via systemd user unit)
+- User systemd unit `codecap.service` (`WantedBy=default.target`)
+- Plasmoid under `$PREFIX/share/plasma/plasmoids/dev.codecap.plasmoid/`
+
+To remove:
+
+```bash
+./scripts/uninstall.sh
+# or: sudo make uninstall
+```
 
 CI runs on every push to `main` and on pull requests: `go vet`, `make test`, and `make test-install`.
 

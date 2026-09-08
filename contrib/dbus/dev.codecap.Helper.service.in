@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=dev.codecap.Helper
+Exec=@BINDIR@/codecap
+SystemdService=codecap.service

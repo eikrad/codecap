@@ -56,6 +56,9 @@ jobs:
       - name: Install layout
         run: make test-install
 
+      - name: Version sync
+        run: make check-version
+
       - name: Vulnerability scan
         # govulncheck is a tool, not a build dependency, so it may use a newer
         # toolchain than the module targets. actions/setup-go pins

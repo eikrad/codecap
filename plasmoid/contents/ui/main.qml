@@ -6,6 +6,7 @@ import QtQuick.Layouts
 import QtCore
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PlasmaComponents
+import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.plasmoid
 import "logic.js" as Logic
 
@@ -34,6 +35,24 @@ PlasmoidItem {
     readonly property var snapshot: snapshotSource.snapshot
     readonly property bool helperReachable: snapshotSource.helperReachable
 
+    // Tray auto-hide. Names come from logic.js so the 80% band is unit-tested;
+    // the mapping onto PlasmaCore.Types is the only part that has to live here
+    // (finding P-M14). Confirmed against plasma/plasma.h ItemStatus and the
+    // in-tree kdeconnect applet.
+    Plasmoid.status: {
+        var name = Logic.trayStatus(
+            snapshot.face,
+            snapshot.session_allowance.used_percent,
+            snapshot.session_allowance.stale
+        )
+        if (name === "needsAttention") {
+            return PlasmaCore.Types.NeedsAttentionStatus
+        }
+        if (name === "active") {
+            return PlasmaCore.Types.ActiveStatus
+        }
+        return PlasmaCore.Types.PassiveStatus
+    }
     // The reported windows are read against this, so a fresh snapshot deserves
     // a fresh clock rather than waiting up to 30 s for the ticker.
     onSnapshotChanged: nowUnix = Math.floor(Date.now() / 1000)
