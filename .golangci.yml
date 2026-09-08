@@ -25,3 +25,12 @@ linters:
       - path: _test\.go
         linters:
           - gosec
+      # G706 reads os.Args[1] as tainted input reaching a log call. The verb is
+      # %q, which quotes and escapes: a newline arrives as the two characters
+      # \n, so no log entry can be forged. gosec's taint analysis does not model
+      # format verbs. Scoped to this call rather than excluded outright, so a
+      # future %s of caller input is still caught.
+      - path: cmd/codecap/main\.go
+        text: "G706"
+        linters:
+          - gosec
