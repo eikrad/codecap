@@ -146,7 +146,7 @@ go run ./cmd/codecap    # helper in foreground
 ./scripts/install-plasmoid.sh  # user-local plasmoid only (QML dev)
 ```
 
-Architecture, domain language, and design decisions: [`docs/design.md`](docs/design.md), [`CONTEXT.md`](CONTEXT.md), [`docs/roadmap.md`](docs/roadmap.md).
+Architecture, domain language, and design decisions: [`docs/design.md`](docs/design.md), [`CONTEXT.md`](CONTEXT.md), [`docs/roadmap.md`](docs/roadmap.md). Cutting a release: [`docs/releasing.md`](docs/releasing.md).
 
 ## Contributing
 

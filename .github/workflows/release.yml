@@ -1,0 +1,97 @@
+# SPDX-FileCopyrightText: 2026 eikrad <eikef.rades@protonmail.com>
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+name: Release
+
+# Tag pushes only. ci.yml runs on main and on pull requests, and never on a
+# tag, so nothing else here would look at the commit being released.
+on:
+  push:
+    tags:
+      - "v*"
+
+# The only workflow in this repository that writes anything. It needs this to
+# create the release; nothing else does, which is why ci.yml stays read-only.
+permissions:
+  contents: write
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Verify the tag, then publish it
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # The tagged commit alone is not enough: the guard below asks whether
+          # main contains it, which needs main's history.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      # A tag on a commit main has never seen is a release of code no gate has
+      # run: ci.yml is triggered by main and pull_request, so a tag pushed from
+      # a local branch would otherwise publish entirely unverified.
+      - name: Tagged commit must be on main
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_SHA is not contained in origin/main."
+            echo "::error::Tag a commit that has been merged, so CI has run on it."
+            exit 1
+          fi
+          echo "tagged commit is on main"
+
+      - name: Tag must name this tree's version
+        run: scripts/check-release-tag.sh "$GITHUB_REF_NAME"
+
+      - name: Install D-Bus
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq dbus
+
+      # Re-run rather than trust that main was green. Cheap, and it is the
+      # difference between "CI passed on this commit" and "CI passed on some
+      # commit". The QML suites are not repeated: they need Qt and Kirigami,
+      # they ran on main, and nothing about tagging changes them.
+      - name: Helper tests
+        run: dbus-run-session -- go test -race ./...
+
+      - name: Plasmoid logic tests
+        run: node --test tests/plasmoid/*.test.mjs
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "codecap ${GITHUB_REF_NAME#v}" --generate-notes
+
+      # PKGBUILD pins sha256sums for a specific tag's archive, and that archive
+      # does not exist until this tag is pushed -- so the checksum can only be
+      # correct here if it was carried over from an earlier release. Reported,
+      # not failed: the release is already published and valid, and this says
+      # exactly what to paste.
+      - name: Check the PKGBUILD checksum against the published archive
+        run: |
+          url="https://github.com/${GITHUB_REPOSITORY}/archive/${GITHUB_REF_NAME}.tar.gz"
+          actual=$(curl -sSL "$url" | sha256sum | cut -d' ' -f1)
+          pinned=$(sed -n "s/^sha256sums=('\(.*\)')/\1/p" PKGBUILD | head -n 1)
+          if [ "$actual" = "$pinned" ]; then
+            echo "PKGBUILD checksum matches the published archive"
+          else
+            echo "::warning::PKGBUILD sha256sums is stale for ${GITHUB_REF_NAME}."
+            echo "::warning::Run 'updpkgsums', or set it to: $actual"
+            echo "::warning::Until then 'makepkg -si' from main will fail validation."
+          fi
