@@ -62,7 +62,12 @@ TestCase {
         // folder silently did nothing. stripFileScheme is the conversion.
         var u = Qt.url("file:///home/me/.claude")
         compare(typeof u, "object")
+        // The missing property is the assertion. qmllint resolves QUrl, so it
+        // reports the very absence this line exists to prove — and with
+        // --max-warnings 0 that would fail the build for being right.
+        // qmllint disable missing-property
         compare(typeof u.toLocalFile, "undefined")
+        // qmllint enable missing-property
         compare(Logic.stripFileScheme(u), "/home/me/.claude")
     }
 

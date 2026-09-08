@@ -132,8 +132,12 @@ lint-go: fmt-check
 lint-sh:
 	shellcheck -s sh scripts/*.sh
 
+# -W 0 makes any warning fail. Without it qmllint exits 0 no matter what it
+# printed: the branch that added a duplicate resolvedAccountHome() to main.qml
+# had qmllint reporting `duplicated-name` on every run while `make lint` stayed
+# green. A gate that reports and does not fail is not a gate.
 lint-qml:
-	$(QMLLINT) $(QMLLINT_FLAGS) $(QML_SOURCES)
+	$(QMLLINT) $(QMLLINT_FLAGS) --max-warnings 0 $(QML_SOURCES)
 
 lint: lint-go lint-sh lint-qml
 
