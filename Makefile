@@ -117,8 +117,14 @@ install:
 	install -m 644 plasmoid/metadata.json $(DESTDIR)$(PLASMOIDDIR)/metadata.json
 	cp -a plasmoid/contents $(DESTDIR)$(PLASMOIDDIR)/
 
+# GO_SOURCE_DIRS, not `.`. `gofmt -l .` walks everything under the checkout,
+# and a GOMODCACHE or GOCACHE pointed inside it (.gocache/ here) puts an entire
+# vendored Go toolchain in scope: fmt-check then failed on Go's own runtime
+# testdata, which is unformatted on purpose and none of our business.
+GO_SOURCE_DIRS := cmd internal tests
+
 fmt-check:
-	@unformatted="$$(gofmt -l .)"; \
+	@unformatted="$$(gofmt -l $(GO_SOURCE_DIRS))"; \
 	if [ -n "$$unformatted" ]; then \
 		echo "gofmt needed:"; echo "$$unformatted"; \
 		gofmt -d $$unformatted; \
