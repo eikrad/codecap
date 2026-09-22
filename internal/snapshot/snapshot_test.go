@@ -6,8 +6,11 @@ package snapshot
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 )
 
@@ -50,6 +53,102 @@ func TestEachFaceHasTheDocumentTheHelperSends(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The bus-contract block in design.md is a sketch, with Face names written as
+// alternatives, so it cannot be byte-compared to a Face document. Its keys
+// still have to be the keys those documents send. A field added on one side
+// only is the drift this exists to catch.
+func TestBusContractSketchHasTheSameKeysAsTheFaceDocuments(t *testing.T) {
+	text, err := os.ReadFile(filepath.Join("..", "..", "docs", "design.md"))
+	if err != nil {
+		t.Fatalf("read design.md: %v", err)
+	}
+	raw, err := busContractJSON(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sketch any
+	if err := json.Unmarshal(raw, &sketch); err != nil {
+		t.Fatalf("bus-contract JSON: %v", err)
+	}
+	documented := map[string]bool{}
+	for _, key := range objectPaths(sketch) {
+		documented[key] = true
+	}
+
+	sent := map[string]bool{}
+	for _, face := range Faces() {
+		data, err := os.ReadFile(filepath.Join("testdata", string(face)+".json"))
+		if err != nil {
+			t.Fatalf("read %s: %v", face, err)
+		}
+		var doc any
+		if err := json.Unmarshal(data, &doc); err != nil {
+			t.Fatalf("unmarshal %s: %v", face, err)
+		}
+		for _, key := range objectPaths(doc) {
+			sent[key] = true
+		}
+	}
+
+	for key := range sent {
+		if !documented[key] {
+			t.Errorf("Face documents send %q, the bus-contract sketch does not list it", key)
+		}
+	}
+	for key := range documented {
+		if !sent[key] {
+			t.Errorf("bus-contract sketch lists %q, no Face document sends it", key)
+		}
+	}
+}
+
+func busContractJSON(design []byte) ([]byte, error) {
+	const open = "```json\n"
+	start := strings.Index(string(design), open)
+	if start < 0 {
+		return nil, fmt.Errorf("design.md has no json fence")
+	}
+	rest := string(design)[start+len(open):]
+	end := strings.Index(rest, "\n```")
+	if end < 0 {
+		return nil, fmt.Errorf("design.md json fence is not closed")
+	}
+	return []byte(rest[:end]), nil
+}
+
+func objectPaths(v any) []string {
+	var paths []string
+	var walk func(prefix string, val any)
+	walk = func(prefix string, val any) {
+		obj, ok := val.(map[string]any)
+		if !ok {
+			if prefix != "" {
+				paths = append(paths, prefix)
+			}
+			return
+		}
+		keys := make([]string, 0, len(obj))
+		for key := range obj {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			next := key
+			if prefix != "" {
+				next = prefix + "." + key
+			}
+			if _, nested := obj[key].(map[string]any); nested {
+				walk(next, obj[key])
+				continue
+			}
+			paths = append(paths, next)
+		}
+	}
+	walk("", v)
+	sort.Strings(paths)
+	return paths
 }
 
 func TestSnapshotMarshalsExpectedTopLevelFields(t *testing.T) {

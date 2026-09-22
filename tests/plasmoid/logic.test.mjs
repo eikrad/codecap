@@ -487,6 +487,21 @@ test("parseSnapshot keeps every field of the helper's Face documents", () => {
     assert.deepEqual(ready.degraded, []);
 });
 
+// An older helper, installed beside a newer plasmoid, sends the Ready document
+// without usage_credit_spend. The amounts are then zero, and the rest of that
+// document still has to come through. The payload is the golden Ready file
+// with the field removed, not a hand-written object.
+test("parseSnapshot reads a ready document whose helper omitted usage credit spend", () => {
+    const ready = JSON.parse(fs.readFileSync(path.join(faceDocuments, "ready.json"), "utf8"));
+    delete ready.usage_credit_spend;
+    const snap = Logic.parseSnapshot(JSON.stringify(ready));
+    assert.equal(snap.face, "ready");
+    assert.equal(snap.schema_version, 1);
+    assert.equal(snap.session_allowance.used_percent, 37);
+    assert.equal(snap.consumed_usage.month.tokens, 444);
+    assert.deepEqual(snap.usage_credit_spend, { used_usd: 0, limit_usd: 0 });
+});
+
 test("trayStatus follows the Session 80% band on the ready face", () => {
     assert.equal(Logic.trayStatus("ready", 0, false), "passive");
     assert.equal(Logic.trayStatus("ready", 79, false), "passive");
