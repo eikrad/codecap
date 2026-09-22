@@ -337,6 +337,59 @@ func TestIntrospectionMatchesTheDeclaredSignature(t *testing.T) {
 	}
 }
 
+// GetSnapshot returns one string, snapshotJSON. That string is a Face document
+// from internal/snapshot/testdata: the same bytes the plasmoid parses.
+func TestGetSnapshotStringOutArgCarriesTheFaceDocuments(t *testing.T) {
+	node := IntrospectNode()
+
+	var method *introspect.Method
+	for i := range node.Interfaces {
+		if node.Interfaces[i].Name != InterfaceName {
+			continue
+		}
+		for j := range node.Interfaces[i].Methods {
+			if node.Interfaces[i].Methods[j].Name == "GetSnapshot" {
+				method = &node.Interfaces[i].Methods[j]
+			}
+		}
+	}
+	if method == nil {
+		t.Fatal("GetSnapshot is not published")
+	}
+
+	var out []introspect.Arg
+	for _, arg := range method.Args {
+		if arg.Direction == "out" {
+			out = append(out, arg)
+		}
+	}
+	if len(out) != 1 || out[0].Name != "snapshotJSON" || out[0].Type != "s" {
+		t.Fatalf("GetSnapshot out-arg is %+v, want one string named snapshotJSON", out)
+	}
+
+	for _, face := range snapshot.Faces() {
+		path := filepath.Join("..", "snapshot", "testdata", string(face)+".json")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if strings.Contains(string(data), "\x00") {
+			t.Fatalf("%s contains a NUL, which a D-Bus string cannot carry", path)
+		}
+
+		var snap snapshot.Snapshot
+		if err := json.Unmarshal(data, &snap); err != nil {
+			t.Fatalf("unmarshal %s: %v", path, err)
+		}
+		if snap.Face != face {
+			t.Fatalf("document face %q, file is named %s", snap.Face, face)
+		}
+		if snap.SchemaVersion != snapshot.SchemaVersion {
+			t.Fatalf("schema_version %d, want %d", snap.SchemaVersion, snapshot.SchemaVersion)
+		}
+	}
+}
+
 func TestGetSnapshotRejectsAnUnusableAccountHome(t *testing.T) {
 	server := NewServer(context.Background(), nil, nil)
 	defer func() { _ = server.Close() }()
