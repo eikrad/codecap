@@ -19,7 +19,8 @@ Finding IDs (`C-2`, `P-C1`, …) refer to the audit.
 | **4 · Make it installable** | **Done bar the AUR checksum.** Install/uninstall, D-Bus→systemd activation, crash restart, tray placement and tray auto-hide at the 80 % Session band all verified on a Plasma 6 desktop. Pinning `sha256sums` needs a tagged release to exist first. |
 | **5.2 · QML component tests** | **Done.** `tests/plasmoid/qml` and `tests/plasmoid/qml-plasma`. |
 | **5.3 · D-Bus harness** | **Done and green (10/10).** Its first real run was 3/10; see below. |
-| 6, rest of 5 | Not started. |
+| **5.1 · Golden snapshot fixtures** | **Done.** One document per Face in `internal/snapshot/testdata`, produced by `json.Marshal` of `snapshot.Example`. The Go test, `logic.test.mjs`, and `GetSnapshot`'s `snapshotJSON` out-arg all read those bytes. The helper stub serves the same examples. |
+| 6, rest of 5 | Not started. 5.4–5.9 remain. |
 
 **What 5.3 found on its first run.** The harness had never executed. On the first
 machine that could run it, 7 of its 10 assertions failed, on two bugs that no other
@@ -336,7 +337,7 @@ auto-hide is a Plasma fact, observable only on a desktop.
 
 | # | Work | Finding |
 |---|---|---|
-| 5.1 | One golden snapshot fixture per face, generated from `internal/snapshot`, consumed by the Go tests, `logic.test.mjs`, **and** an assertion on `Export`'s introspection XML. Contract drift becomes impossible | `M-8`, `H-7` |
+| 5.1 | **Done.** One golden snapshot fixture per face, generated from `internal/snapshot`, consumed by the Go tests, `logic.test.mjs`, **and** an assertion on `Export`'s introspection XML. Contract drift becomes impossible | `M-8`, `H-7` |
 | 5.2 | **Done.** `qmltestrunner6` under `QT_QPA_PLATFORM=offscreen` for the pure components — `CompactRing` and `AllowanceBar` take only plain properties, so colour/visibility/geometry are testable with no D-Bus | `P-M · coverage` |
 | 5.3 | **Written, never executed.** `dbus-run-session` + a stub `dev.codecap.Helper` driving `SnapshotSource`, which is `main.qml`'s bus half extracted so that a test runner can instantiate it at all. Covers the failure and partial-data faces. `P-C3` is *not* covered — the click-to-expand `MouseArea` needs the compact representation, which still cannot be instantiated outside an applet; see below | `P-C2`, `P-H3`, `P-M3`–`P-M6` |
 | 5.4 | Stop monkey-patching `Number.prototype.toLocaleString`; inject a formatting seam so the tests exercise real behaviour | `P-M7` |

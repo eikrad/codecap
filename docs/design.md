@@ -65,6 +65,7 @@ what is cached and returns; refreshes run in the helper and announce themselves 
   "session_allowance": { "used_percent": 0, "resets_at": 0, "stale": false },
   "weekly_allowance": { "used_percent": 0, "resets_at": 0, "stale": false },
   "usage_credit": "none | enabled | available | exhausted",
+  "usage_credit_spend": { "used_usd": 0, "limit_usd": 0 },
   "consumed_usage": {
     "session": { "list_price_usd": 0, "tokens": 0 },
     "today": { "list_price_usd": 0, "tokens": 0 },

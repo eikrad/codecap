@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -152,6 +153,22 @@ func TestControlIntrospectionDescribesEveryScriptingMethod(t *testing.T) {
 	} {
 		if !declared[want] {
 			t.Fatalf("%s is exported but not introspectable\n%s", want, doc)
+		}
+	}
+}
+
+func TestFixtureIsTheSharedFaceExample(t *testing.T) {
+	for _, face := range snapshot.Faces() {
+		got, err := json.Marshal(Fixture(string(face)))
+		if err != nil {
+			t.Fatalf("marshal fixture %s: %v", face, err)
+		}
+		want, err := json.Marshal(snapshot.Example(face))
+		if err != nil {
+			t.Fatalf("marshal example %s: %v", face, err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("fixture %s is not the shared Face example\nfixture: %s\nexample: %s", face, got, want)
 		}
 	}
 }
