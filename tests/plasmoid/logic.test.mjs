@@ -2,8 +2,20 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { loadLogic } from "./load-logic.mjs";
+
+const faceDocuments = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "..",
+    "internal",
+    "snapshot",
+    "testdata"
+);
 
 const Logic = loadLogic();
 const colors = { disabled: "gray", negative: "red", neutral: "orange", highlight: "blue" };
@@ -421,6 +433,58 @@ test("trayStatus keeps faces that need the user visible", () => {
     assert.equal(Logic.trayStatus("unbound", 0, false), "needsAttention");
     assert.equal(Logic.trayStatus("signed_out", 0, false), "needsAttention");
     assert.equal(Logic.trayStatus("unknown_allowance", 0, false), "active");
+});
+
+test("parseSnapshot keeps every field of the helper's Face documents", () => {
+    // These bytes are json.Marshal of snapshot.Example. The literals below are
+    // the spec, not a second parse of the file: dropping a field in
+    // normalizeSnapshot has to fail here even when the Go side is unchanged.
+    const read = (face) => fs.readFileSync(path.join(faceDocuments, `${face}.json`), "utf8");
+
+    const unbound = Logic.parseSnapshot(read("unbound"));
+    assert.equal(unbound.face, "unbound");
+    assert.equal(unbound.schema_version, 1);
+    assert.equal(unbound.account_home, "");
+    assert.equal(unbound.account_label, "");
+    assert.equal(unbound.usage_credit, "none");
+    assert.deepEqual(unbound.degraded, []);
+    assert.equal(unbound.fetched_at, 1756200000);
+    assert.deepEqual(unbound.usage_credit_spend, { used_usd: 0, limit_usd: 0 });
+
+    const signedOut = Logic.parseSnapshot(read("signed_out"));
+    assert.equal(signedOut.face, "signed_out");
+    assert.equal(signedOut.schema_version, 1);
+    assert.equal(signedOut.account_home, "/home/me/.claude");
+    assert.equal(signedOut.account_label, "stub@example.invalid");
+    assert.equal(signedOut.usage_credit, "none");
+    assert.deepEqual(signedOut.degraded, []);
+    assert.deepEqual(signedOut.session_allowance, { used_percent: 0, resets_at: 0, stale: false });
+
+    const unknown = Logic.parseSnapshot(read("unknown_allowance"));
+    assert.equal(unknown.face, "unknown_allowance");
+    assert.deepEqual(unknown.degraded, ["allowance_unavailable"]);
+    assert.equal(unknown.usage_credit, "none");
+    assert.deepEqual(unknown.consumed_usage.today, { list_price_usd: 3.5, tokens: 222 });
+    assert.deepEqual(unknown.consumed_usage.session, { list_price_usd: 0, tokens: 0 });
+    assert.equal(unknown.account_home, "/home/me/.claude");
+
+    const ready = Logic.parseSnapshot(read("ready"));
+    assert.equal(ready.face, "ready");
+    assert.equal(ready.schema_version, 1);
+    assert.equal(ready.account_home, "/home/me/.claude");
+    assert.equal(ready.account_label, "stub@example.invalid");
+    assert.equal(ready.fetched_at, 1756200000);
+    assert.equal(ready.usage_credit, "enabled");
+    assert.deepEqual(ready.usage_credit_spend, { used_usd: 4.04, limit_usd: 4 });
+    assert.deepEqual(ready.session_allowance, { used_percent: 37, resets_at: 1756203600, stale: false });
+    assert.deepEqual(ready.weekly_allowance, { used_percent: 61, resets_at: 1756720000, stale: false });
+    assert.deepEqual(ready.consumed_usage, {
+        session: { list_price_usd: 1.25, tokens: 111 },
+        today: { list_price_usd: 3.5, tokens: 222 },
+        week: { list_price_usd: 12.75, tokens: 333 },
+        month: { list_price_usd: 40, tokens: 444 }
+    });
+    assert.deepEqual(ready.degraded, []);
 });
 
 test("trayStatus follows the Session 80% band on the ready face", () => {
