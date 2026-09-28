@@ -63,7 +63,7 @@ type Stub struct {
 
 // NewStub builds a stub serving the "ready" fixture.
 func NewStub(conn *dbus.Conn) *Stub {
-	return &Stub{conn: conn, snap: Fixture(string(snapshot.FaceReady))}
+	return &Stub{conn: conn, snap: snapshot.Example(snapshot.FaceReady)}
 }
 
 // Export publishes the helper interface, its introspection, and the control
@@ -164,7 +164,7 @@ func (s *Stub) getSnapshot(accountHome, timezone string, weekStart int32) (strin
 func (s *Stub) setFace(face string) *dbus.Error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.snap = Fixture(face)
+	s.snap = snapshot.Example(snapshot.Face(face))
 	s.raw, s.rawSet = "", false
 	return nil
 }
@@ -230,7 +230,7 @@ func (s *Stub) callLog() (string, *dbus.Error) {
 func (s *Stub) reset() *dbus.Error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.snap = Fixture(string(snapshot.FaceReady))
+	s.snap = snapshot.Example(snapshot.FaceReady)
 	s.raw, s.rawSet = "", false
 	s.failure = ""
 	s.delay = 0

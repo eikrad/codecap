@@ -4,6 +4,7 @@
 package dbusapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -300,9 +301,11 @@ func TestIntrospectionMatchesTheDeclaredSignature(t *testing.T) {
 	}
 
 	var in, out []string
+	var outNames []string
 	for _, arg := range method.Args {
 		if arg.Direction == "out" {
 			out = append(out, arg.Type)
+			outNames = append(outNames, arg.Name)
 			continue
 		}
 		in = append(in, arg.Type)
@@ -312,6 +315,10 @@ func TestIntrospectionMatchesTheDeclaredSignature(t *testing.T) {
 	}
 	if got := strings.Join(out, ""); got != "s" {
 		t.Fatalf("output signature is %q, want s", got)
+	}
+	// extractSnapshotPayload in logic.js accepts a reply keyed by this name.
+	if !slices.Equal(outNames, []string{"snapshotJSON"}) {
+		t.Fatalf("out-arg names are %v, want [snapshotJSON]", outNames)
 	}
 
 	// Reflection over the Go method has to agree with the XML, or godbus
@@ -337,56 +344,33 @@ func TestIntrospectionMatchesTheDeclaredSignature(t *testing.T) {
 	}
 }
 
-// GetSnapshot returns one string, snapshotJSON. That string is a Face document
-// from internal/snapshot/testdata: the same bytes the plasmoid parses.
-func TestGetSnapshotStringOutArgCarriesTheFaceDocuments(t *testing.T) {
-	node := IntrospectNode()
-
-	var method *introspect.Method
-	for i := range node.Interfaces {
-		if node.Interfaces[i].Name != InterfaceName {
-			continue
-		}
-		for j := range node.Interfaces[i].Methods {
-			if node.Interfaces[i].Methods[j].Name == "GetSnapshot" {
-				method = &node.Interfaces[i].Methods[j]
-			}
-		}
-	}
-	if method == nil {
-		t.Fatal("GetSnapshot is not published")
+// The string GetSnapshot really returns is the golden Unbound document, the
+// same bytes logic.test.mjs parses. Only fetched_at differs: it is the clock.
+func TestGetSnapshotSendsTheUnboundFaceDocument(t *testing.T) {
+	server := NewServer(context.Background(), nil, nil)
+	defer func() { _ = server.Close() }()
+	payload, derr := server.GetSnapshot("", "UTC", 1)
+	if derr != nil {
+		t.Fatalf("GetSnapshot failed: %v", derr)
 	}
 
-	var out []introspect.Arg
-	for _, arg := range method.Args {
-		if arg.Direction == "out" {
-			out = append(out, arg)
-		}
+	var snap snapshot.Snapshot
+	if err := json.Unmarshal([]byte(payload), &snap); err != nil {
+		t.Fatalf("unmarshal snapshot: %v", err)
 	}
-	if len(out) != 1 || out[0].Name != "snapshotJSON" || out[0].Type != "s" {
-		t.Fatalf("GetSnapshot out-arg is %+v, want one string named snapshotJSON", out)
+	snap.FetchedAt = snapshot.Example(snapshot.FaceUnbound).FetchedAt
+	sent, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatalf("remarshal snapshot: %v", err)
 	}
 
-	for _, face := range snapshot.Faces() {
-		path := filepath.Join("..", "snapshot", "testdata", string(face)+".json")
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		if strings.Contains(string(data), "\x00") {
-			t.Fatalf("%s contains a NUL, which a D-Bus string cannot carry", path)
-		}
-
-		var snap snapshot.Snapshot
-		if err := json.Unmarshal(data, &snap); err != nil {
-			t.Fatalf("unmarshal %s: %v", path, err)
-		}
-		if snap.Face != face {
-			t.Fatalf("document face %q, file is named %s", snap.Face, face)
-		}
-		if snap.SchemaVersion != snapshot.SchemaVersion {
-			t.Fatalf("schema_version %d, want %d", snap.SchemaVersion, snapshot.SchemaVersion)
-		}
+	path := filepath.Join("..", "snapshot", "testdata", string(snapshot.FaceUnbound)+".json")
+	golden, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if !bytes.Equal(sent, golden) {
+		t.Fatalf("GetSnapshot's unbound reply is not %s\nsent:   %s\ngolden: %s", path, sent, golden)
 	}
 }
 

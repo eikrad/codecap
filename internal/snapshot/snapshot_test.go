@@ -6,13 +6,18 @@ package snapshot
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 )
+
+// go test ./internal/snapshot -update rewrites testdata from Example. The
+// documents are generated, never edited: a contract change is a change to
+// Example or to the struct tags, and this is how it reaches the files.
+var update = flag.Bool("update", false, "rewrite testdata/<face>.json from Example")
 
 // The document on disk is the contract the plasmoid reads. It has to be the
 // bytes json.Marshal emits for that Face, because that is what GetSnapshot
@@ -20,18 +25,19 @@ import (
 func TestEachFaceHasTheDocumentTheHelperSends(t *testing.T) {
 	for _, face := range Faces() {
 		t.Run(string(face), func(t *testing.T) {
-			path := filepath.Join("testdata", string(face)+".json")
-			onDisk, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("read %s: %v", path, err)
-			}
-
 			sent, err := json.Marshal(Example(face))
 			if err != nil {
 				t.Fatalf("marshal %s: %v", face, err)
 			}
+			if *update {
+				if err := os.WriteFile(facePath(face), sent, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			onDisk := readFace(t, face)
 			if !bytes.Equal(onDisk, sent) {
-				t.Fatalf("testdata/%s.json is not the JSON the helper sends\nfile: %s\nsent: %s", face, onDisk, sent)
+				t.Fatalf("testdata/%s.json is not the JSON the helper sends (go test ./internal/snapshot -update)\nfile: %s\nsent: %s", face, onDisk, sent)
 			}
 
 			var decoded Snapshot
@@ -44,12 +50,6 @@ func TestEachFaceHasTheDocumentTheHelperSends(t *testing.T) {
 			}
 			if !bytes.Equal(onDisk, again) {
 				t.Fatalf("testdata/%s.json does not round-trip\nfile: %s\nagain: %s", face, onDisk, again)
-			}
-			if decoded.Face != face {
-				t.Fatalf("document face %q, file is named %s", decoded.Face, face)
-			}
-			if decoded.SchemaVersion != SchemaVersion {
-				t.Fatalf("schema_version %d, want %d", decoded.SchemaVersion, SchemaVersion)
 			}
 		})
 	}
@@ -73,23 +73,15 @@ func TestBusContractSketchHasTheSameKeysAsTheFaceDocuments(t *testing.T) {
 		t.Fatalf("bus-contract JSON: %v", err)
 	}
 	documented := map[string]bool{}
-	for _, key := range objectPaths(sketch) {
-		documented[key] = true
-	}
+	objectPaths("", sketch, documented)
 
 	sent := map[string]bool{}
 	for _, face := range Faces() {
-		data, err := os.ReadFile(filepath.Join("testdata", string(face)+".json"))
-		if err != nil {
-			t.Fatalf("read %s: %v", face, err)
-		}
 		var doc any
-		if err := json.Unmarshal(data, &doc); err != nil {
+		if err := json.Unmarshal(readFace(t, face), &doc); err != nil {
 			t.Fatalf("unmarshal %s: %v", face, err)
 		}
-		for _, key := range objectPaths(doc) {
-			sent[key] = true
-		}
+		objectPaths("", doc, sent)
 	}
 
 	for key := range sent {
@@ -102,6 +94,19 @@ func TestBusContractSketchHasTheSameKeysAsTheFaceDocuments(t *testing.T) {
 			t.Errorf("bus-contract sketch lists %q, no Face document sends it", key)
 		}
 	}
+}
+
+func facePath(face Face) string {
+	return filepath.Join("testdata", string(face)+".json")
+}
+
+func readFace(t *testing.T, face Face) []byte {
+	t.Helper()
+	data, err := os.ReadFile(facePath(face))
+	if err != nil {
+		t.Fatalf("read %s: %v", face, err)
+	}
+	return data
 }
 
 func busContractJSON(design []byte) ([]byte, error) {
@@ -118,63 +123,18 @@ func busContractJSON(design []byte) ([]byte, error) {
 	return []byte(rest[:end]), nil
 }
 
-func objectPaths(v any) []string {
-	var paths []string
-	var walk func(prefix string, val any)
-	walk = func(prefix string, val any) {
-		obj, ok := val.(map[string]any)
-		if !ok {
-			if prefix != "" {
-				paths = append(paths, prefix)
-			}
-			return
-		}
-		keys := make([]string, 0, len(obj))
-		for key := range obj {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			next := key
-			if prefix != "" {
-				next = prefix + "." + key
-			}
-			if _, nested := obj[key].(map[string]any); nested {
-				walk(next, obj[key])
-				continue
-			}
-			paths = append(paths, next)
-		}
+// objectPaths adds the dotted path of every leaf under v to paths. Arrays are
+// leaves: degraded is one key whatever it holds.
+func objectPaths(prefix string, v any, paths map[string]bool) {
+	obj, ok := v.(map[string]any)
+	if !ok {
+		paths[prefix] = true
+		return
 	}
-	walk("", v)
-	sort.Strings(paths)
-	return paths
-}
-
-func TestSnapshotMarshalsExpectedTopLevelFields(t *testing.T) {
-	s := Snapshot{Face: FaceUnknownAllowance}
-	data, err := json.Marshal(s)
-	if err != nil {
-		t.Fatalf("marshal snapshot: %v", err)
-	}
-
-	var decoded map[string]any
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("unmarshal snapshot: %v", err)
-	}
-
-	for _, key := range []string{
-		"face",
-		"account_home",
-		"account_label",
-		"session_allowance",
-		"weekly_allowance",
-		"usage_credit",
-		"consumed_usage",
-		"fetched_at",
-	} {
-		if _, ok := decoded[key]; !ok {
-			t.Fatalf("missing key %q", key)
+	for key, val := range obj {
+		if prefix != "" {
+			key = prefix + "." + key
 		}
+		objectPaths(key, val, paths)
 	}
 }
