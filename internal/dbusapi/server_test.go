@@ -4,6 +4,7 @@
 package dbusapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -300,9 +301,11 @@ func TestIntrospectionMatchesTheDeclaredSignature(t *testing.T) {
 	}
 
 	var in, out []string
+	var outNames []string
 	for _, arg := range method.Args {
 		if arg.Direction == "out" {
 			out = append(out, arg.Type)
+			outNames = append(outNames, arg.Name)
 			continue
 		}
 		in = append(in, arg.Type)
@@ -312,6 +315,10 @@ func TestIntrospectionMatchesTheDeclaredSignature(t *testing.T) {
 	}
 	if got := strings.Join(out, ""); got != "s" {
 		t.Fatalf("output signature is %q, want s", got)
+	}
+	// extractSnapshotPayload in logic.js accepts a reply keyed by this name.
+	if !slices.Equal(outNames, []string{"snapshotJSON"}) {
+		t.Fatalf("out-arg names are %v, want [snapshotJSON]", outNames)
 	}
 
 	// Reflection over the Go method has to agree with the XML, or godbus
@@ -334,6 +341,36 @@ func TestIntrospectionMatchesTheDeclaredSignature(t *testing.T) {
 	}
 	if len(signals) != 1 || signals[0] != "Changed" {
 		t.Fatalf("published signals are %v, the plasmoid listens for Changed", signals)
+	}
+}
+
+// The string GetSnapshot really returns is the golden Unbound document, the
+// same bytes logic.test.mjs parses. Only fetched_at differs: it is the clock.
+func TestGetSnapshotSendsTheUnboundFaceDocument(t *testing.T) {
+	server := NewServer(context.Background(), nil, nil)
+	defer func() { _ = server.Close() }()
+	payload, derr := server.GetSnapshot("", "UTC", 1)
+	if derr != nil {
+		t.Fatalf("GetSnapshot failed: %v", derr)
+	}
+
+	var snap snapshot.Snapshot
+	if err := json.Unmarshal([]byte(payload), &snap); err != nil {
+		t.Fatalf("unmarshal snapshot: %v", err)
+	}
+	snap.FetchedAt = snapshot.Example(snapshot.FaceUnbound).FetchedAt
+	sent, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatalf("remarshal snapshot: %v", err)
+	}
+
+	path := filepath.Join("..", "snapshot", "testdata", string(snapshot.FaceUnbound)+".json")
+	golden, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if !bytes.Equal(sent, golden) {
+		t.Fatalf("GetSnapshot's unbound reply is not %s\nsent:   %s\ngolden: %s", path, sent, golden)
 	}
 }
 
