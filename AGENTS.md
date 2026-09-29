@@ -240,8 +240,10 @@ Never report a phase complete on the strength of the pipeline alone.
   Keep vendor HTTP in the helper.
 - Testable logic goes in `logic.js`, not in `.qml` — it is the only plasmoid code CI
   can actually execute. What genuinely has to be QML goes in a component taking
-  plain properties, like `CompactRing` and `SnapshotSource`, so a test runner can
-  instantiate it. `main.qml` itself never can: `PlasmoidItem` only works inside
-  Plasma's applet machinery, and `Plasmoid.configuration` is null anywhere else.
+  plain properties, like `CompactRing`, `SnapshotSource` and `CompactFace`, so a
+  test runner can instantiate it. `main.qml` itself never can: `PlasmoidItem`
+  only works inside Plasma's applet machinery, and `Plasmoid.configuration` is
+  null anywhere else. What is left in `main.qml` should be the lines only the
+  applet can own — a binding to `expanded`, or to `Plasmoid.configuration`.
 - Decisions belong in an ADR. If you find yourself choosing between two designs
   mid-implementation, stop and ask.

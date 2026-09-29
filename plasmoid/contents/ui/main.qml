@@ -239,25 +239,19 @@ PlasmoidItem {
 
     // A custom compactRepresentation replaces DefaultCompactRepresentation,
     // which is where Plasma's click-to-expand lives, so it has to be restored
-    // here or the expanded face is unreachable by mouse.
-    compactRepresentation: MouseArea {
-        id: compactRoot
-
-        implicitWidth: ring.implicitWidth
-        implicitHeight: ring.implicitHeight
-        acceptedButtons: Qt.LeftButton
-        onClicked: root.expanded = !root.expanded
-
-        CompactRing {
-            id: ring
-            anchors.fill: parent
-            face: root.snapshot.face
-            helperAvailable: root.helperReachable
-            isBound: root.isBound
-            usedPercent: root.snapshot.session_allowance.used_percent
-            stale: root.snapshot.session_allowance.stale
-            showNumeral: compactRoot.width >= Kirigami.Units.gridUnit * 2.5
-        }
+    // or the expanded face is unreachable by mouse (finding P-C3).
+    //
+    // The representation itself is CompactFace, so that a test runner can
+    // instantiate it and deliver a real click -- nothing that stays in this
+    // file can be executed by a test. What is left here is the one line only
+    // the applet can own: `expanded` is a PlasmoidItem property.
+    compactRepresentation: CompactFace {
+        face: root.snapshot.face
+        helperAvailable: root.helperReachable
+        isBound: root.isBound
+        usedPercent: root.snapshot.session_allowance.used_percent
+        stale: root.snapshot.session_allowance.stale
+        onActivated: root.expanded = !root.expanded
     }
 
     fullRepresentation: Kirigami.ScrollablePage {
