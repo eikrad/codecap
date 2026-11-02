@@ -16,10 +16,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/eikrad/codecap/internal/agent"
 	"github.com/eikrad/codecap/internal/snapshot"
 )
 
-const sessionWindow = 5 * time.Hour
+const (
+	sessionWindow = 5 * time.Hour
+	// Real Claude attachment records exceed 4 MiB. Keep a separate bounded
+	// record limit, large enough for those records without allocating it up
+	// front or removing the whole-file bound in Cache.
+	maxLogRecordBytes = 64 << 20
+)
 
 // cacheCreation splits a cache write by the lifetime it was written with. The
 // two are priced differently — a one-hour entry costs more to write than a
@@ -64,10 +71,13 @@ func (u tokenUsage) cacheWriteSplit() (oneHour, fiveMinute int64) {
 }
 
 type usageEvent struct {
-	Type      string `json:"type"`
-	UUID      string `json:"uuid"`
-	Timestamp string `json:"timestamp"`
+	Type      string          `json:"type"`
+	UUID      string          `json:"uuid"`
+	RequestID string          `json:"requestId"`
+	Timestamp string          `json:"timestamp"`
+	Payload   json.RawMessage `json:"payload"`
 	Message   struct {
+		ID    string     `json:"id"`
 		Model string     `json:"model"`
 		Usage tokenUsage `json:"usage"`
 	} `json:"message"`
@@ -132,7 +142,22 @@ func resolveLocation(timezone string) (*time.Location, error) {
 }
 
 func listJSONLFiles(accountHome string) ([]string, error) {
-	projectsDir := filepath.Join(accountHome, "projects")
+	a, err := agent.Detect(accountHome)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, dir := range a.LogDirectories() {
+		found, err := listLogsUnder(filepath.Join(accountHome, dir))
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, found...)
+	}
+	return files, nil
+}
+
+func listLogsUnder(projectsDir string) ([]string, error) {
 	info, err := os.Stat(projectsDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -141,13 +166,13 @@ func listJSONLFiles(accountHome string) ([]string, error) {
 		return nil, err
 	}
 	if !info.IsDir() {
-		return nil, nil
+		return nil, fmt.Errorf("invalid Consumed Usage root %s: not a directory", projectsDir)
 	}
 
 	var files []string
 	err = filepath.WalkDir(projectsDir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return nil
+			return walkErr
 		}
 		if d.IsDir() {
 			return nil
@@ -160,6 +185,9 @@ func listJSONLFiles(accountHome string) ([]string, error) {
 			return nil
 		}
 		if strings.HasSuffix(d.Name(), ".jsonl") {
+			if len(files) == maxTrackedFiles {
+				return fmt.Errorf("too many Consumed Usage log files (limit %d)", maxTrackedFiles)
+			}
 			files = append(files, path)
 		}
 		return nil
@@ -192,9 +220,10 @@ func parseEvents(path string, rates Rates, cutoff time.Time) ([]event, error) {
 
 func parseEventsFrom(reader io.Reader, rates Rates, cutoff time.Time) ([]event, error) {
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxLogRecordBytes)
 
 	var events []event
+	var codex codexLog
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -202,6 +231,16 @@ func parseEventsFrom(reader io.Reader, rates Rates, cutoff time.Time) ([]event, 
 		}
 		var decoded usageEvent
 		if err := json.Unmarshal([]byte(line), &decoded); err != nil {
+			continue
+		}
+		if decoded.Type == "turn_context" || decoded.Type == "event_msg" {
+			ev, ok, err := codex.consume(decoded)
+			if err != nil {
+				return nil, err
+			}
+			if ok && !ev.at.Before(cutoff) {
+				events = append(events, ev)
+			}
 			continue
 		}
 		if decoded.Type != "assistant" {
@@ -217,9 +256,16 @@ func parseEventsFrom(reader io.Reader, rates Rates, cutoff time.Time) ([]event, 
 		}
 
 		usageCounts := decoded.Message.Usage
+		// A message's content blocks have distinct log UUIDs but repeat the
+		// entire request's usage. Deduplicate the API request, not its blocks.
+		identity := decoded.UUID
+		if decoded.Message.ID != "" {
+			identity = "request:" + decoded.Message.ID + ":" + decoded.RequestID
+		}
 		events = append(events, event{
-			at:   at,
-			uuid: decoded.UUID,
+			at:             at,
+			identity:       identity,
+			replaceEarlier: decoded.Message.ID != "",
 			tokens: usageCounts.InputTokens + usageCounts.OutputTokens +
 				usageCounts.CacheCreationInputTokens + usageCounts.CacheReadInputTokens,
 			priceUSD: estimateListPriceUSD(rates, decoded.Message.Model, usageCounts),
@@ -283,4 +329,5 @@ func inPeriod(t time.Time, p period) bool {
 func addPeriod(dst *snapshot.ConsumedPeriod, src snapshot.ConsumedPeriod) {
 	dst.ListPriceUSD += src.ListPriceUSD
 	dst.Tokens += src.Tokens
+	dst.ListPriceUnavailable = dst.ListPriceUnavailable || src.ListPriceUnavailable
 }

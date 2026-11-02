@@ -58,7 +58,7 @@ what is cached and returns; refreshes run in the helper and announce themselves 
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "face": "unbound | signed_out | unknown_allowance | ready",
   "account_home": "",
   "account_label": "",
@@ -67,10 +67,10 @@ what is cached and returns; refreshes run in the helper and announce themselves 
   "usage_credit": "none | enabled | available | exhausted",
   "usage_credit_spend": { "used_usd": 0, "limit_usd": 0 },
   "consumed_usage": {
-    "session": { "list_price_usd": 0, "tokens": 0 },
-    "today": { "list_price_usd": 0, "tokens": 0 },
-    "week": { "list_price_usd": 0, "tokens": 0 },
-    "month": { "list_price_usd": 0, "tokens": 0 }
+    "session": { "list_price_usd": 0, "tokens": 0, "list_price_unavailable": false },
+    "today": { "list_price_usd": 0, "tokens": 0, "list_price_unavailable": false },
+    "week": { "list_price_usd": 0, "tokens": 0, "list_price_unavailable": false },
+    "month": { "list_price_usd": 0, "tokens": 0, "list_price_unavailable": false }
   },
   "fetched_at": 0,
   "degraded": ["pending | usage_unavailable | allowance_unavailable"]
@@ -78,6 +78,12 @@ what is cached and returns; refreshes run in the helper and announce themselves 
 ```
 
 ## Visual
+
+> **Visual scope revision 2026-10-28 — Codex.** At the user's request, the same
+> Session and Weekly Allowance ring/bars also apply to Codex's reported 300-minute
+> and 10080-minute windows. Account Home examples and sign-in copy cover both
+> Agents. A period with an unknown List Price says "List Price unavailable" and
+> still shows tokens. Layout, colours and compact content are unchanged.
 
 Frozen 2026-08-20. Chrome only. Compact **content** (Session used % + time to reset; never fake 0%) is domain, in [`CONTEXT.md`](../CONTEXT.md). Change look only with an explicit visual revision, not as a side effect of implementation.
 
@@ -98,6 +104,18 @@ Frozen 2026-08-20. Chrome only. Compact **content** (Session used % + time to re
 **Empty faces:** never draw 0% bars. Unbound → `Kirigami.PlaceholderMessage` (folder icon) plus Configure…. Signed Out → placeholder (unlock icon) asking to sign in with that Agent for this Account Home (no login form in QML). Unknown Allowance → keep Account label and Consumed Usage; hide Session/Weekly bars; question icon + one-line note. Account Home is picked in **Configure Widget** (Plasma folder picker), not as a live path field in the popup.
 
 **Configure Widget:** two fields only in v1 — Account Home (folder picker; placeholder hint `~/.claude`) and Display Currency (default desktop locale, optional ISO override). No colour picker, no threshold sliders, no compact-layout checkboxes. Compact % numeral is automatic from available width.
+
+> **Visual revision 2026-11-02 — optional widget identification, requested by the
+> user.** Extend the v1 configuration scope with an optional **Widget marker**:
+> enable a small color dot and choose its color independently per widget. It is
+> off by default; without a custom color it uses the desktop accent. The dot
+> sits in the compact Face's upper-right corner, including empty Faces, without
+> changing the ring's geometry or the central percentage; the same dot appears
+> beside the expanded Account label on the desktop/in the popup. Allowance and stale
+> colors retain their meaning. No panel short name or Agent logo is added.
+> Existing Account labels remain the textual identity. Controls and spacing
+> follow Qt/Kirigami; there is no hard-coded palette. This is the explicit
+> exception to the v1 no-color-picker scope. See ADR 0018.
 
 
 

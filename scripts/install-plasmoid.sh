@@ -27,5 +27,10 @@ cat <<EOF
 User-local plasmoid updated. The helper is unchanged — install it once with:
   ./scripts/install.sh
 
-If the widget is already on a panel, remove and re-add it or restart plasmashell.
+If Plasma was already running, restart its shell to load the new QML and settings:
+  systemctl --user restart plasma-plasmashell.service
+Or log out and back in. Existing saved widget preferences are retained.
+
+New settings may otherwise appear without enabling Apply: reopening the settings
+dialog or restarting the helper does not reload Plasma's cached main.xml schema.
 EOF

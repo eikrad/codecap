@@ -21,9 +21,138 @@ import (
 	"time"
 
 	"github.com/eikrad/codecap/internal/allowance"
+	"github.com/eikrad/codecap/internal/codex"
 	"github.com/eikrad/codecap/internal/snapshot"
 	"github.com/godbus/dbus/v5/introspect"
 )
+
+func writeCurrentCodexLog(t *testing.T, home string) string {
+	t.Helper()
+	dir := filepath.Join(home, "sessions")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := os.ReadFile("../usage/testdata/codex-token-counts.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Move only the captured event times into the current aggregation window,
+	// so this integration test also works after the capture month has ended.
+	var currentLogs bytes.Buffer
+	for _, line := range bytes.Split(bytes.TrimSpace(logs), []byte("\n")) {
+		var envelope map[string]json.RawMessage
+		if err := json.Unmarshal(line, &envelope); err != nil {
+			t.Fatal(err)
+		}
+		stamp, err := json.Marshal(time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano))
+		if err != nil {
+			t.Fatal(err)
+		}
+		envelope["timestamp"] = stamp
+		if err := json.NewEncoder(&currentLogs).Encode(envelope); err != nil {
+			t.Fatal(err)
+		}
+	}
+	logs = currentLogs.Bytes()
+	path := filepath.Join(dir, "rollout.jsonl")
+	if err := os.WriteFile(path, logs, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestCodexAccountHomeServesBothAllowanceWindowsAndLocalConsumedUsage(t *testing.T) {
+	home := t.TempDir()
+	writeCurrentCodexLog(t, home)
+	data, err := os.ReadFile("../codex/testdata/rate-limits.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := codex.FromRateLimits(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := allowance.NewService(allowance.NewLastKnownStore(t.TempDir()))
+	svc.CodexFetch = func(_ context.Context, accountHome string) (codex.Result, error) {
+		if accountHome != home {
+			t.Errorf("Codex read wrong Account Home: %q", accountHome)
+		}
+		return result, nil
+	}
+	server := NewServer(context.Background(), nil, svc)
+	t.Cleanup(func() { _ = server.Close() })
+	snap := snapshotAfterRefresh(t, server, home)
+	if snap.Face != snapshot.FaceReady || snap.SessionAllowance.UsedPercent != 31 || snap.WeeklyAllowance.UsedPercent != 7 || snap.ConsumedUsage.Month.Tokens != 154550 || snap.UsageCredit != "none" {
+		t.Fatalf("Codex snapshot: %+v", snap)
+	}
+	// Losing the live endpoint must visibly retain Last-Known Allowance.
+	server.poller.Stop()
+	server.refreshes.Wait()
+	svc.CodexFetch = func(context.Context, string) (codex.Result, error) { return codex.Result{}, fmt.Errorf("offline") }
+	if changed, err := server.refreshAllowance(context.Background(), home); !changed || err == nil {
+		t.Fatalf("offline read must serve Last-Known Allowance and report its failed fetch: %v, %v", changed, err)
+	}
+	payload, derr := server.GetSnapshot(home, "UTC", 1)
+	if derr != nil {
+		t.Fatal(derr)
+	}
+	if err := json.Unmarshal([]byte(payload), &snap); err != nil {
+		t.Fatal(err)
+	}
+	if snap.Face != snapshot.FaceReady || !snap.SessionAllowance.Stale || !snap.WeeklyAllowance.Stale {
+		t.Fatalf("lost Last-Known Codex Allowance: %+v", snap)
+	}
+}
+
+func TestFailedConsumedUsageRefreshKeepsKnownAmountsWithAVisibleReason(t *testing.T) {
+	home := t.TempDir()
+	path := writeCurrentCodexLog(t, home)
+	server := NewServer(context.Background(), nil, nil)
+	t.Cleanup(func() { _ = server.Close() })
+	known := snapshotAfterRefresh(t, server, home)
+	if known.ConsumedUsage.Month.Tokens != 154550 {
+		t.Fatalf("bad initial usage: %+v", known.ConsumedUsage)
+	}
+	server.poller.Stop()
+	server.logWatches.Forget(home)
+	root := filepath.Dir(path)
+	saved := filepath.Join(home, "saved_sessions")
+	if err := os.Rename(root, saved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server.onUsageChanged(home)
+	payload, derr := server.GetSnapshot(home, "UTC", 1)
+	if derr != nil {
+		t.Fatal(derr)
+	}
+	var snap snapshot.Snapshot
+	if err := json.Unmarshal([]byte(payload), &snap); err != nil {
+		t.Fatal(err)
+	}
+	if snap.ConsumedUsage.Month.Tokens != known.ConsumedUsage.Month.Tokens || !slices.Contains(snap.Degraded, snapshot.DegradedUsage) {
+		t.Fatalf("failed refresh must preserve amounts and expose usage_unavailable: %+v", snap)
+	}
+	if err := os.Remove(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(saved, root); err != nil {
+		t.Fatal(err)
+	}
+	server.onUsageChanged(home)
+	payload, derr = server.GetSnapshot(home, "UTC", 1)
+	if derr != nil {
+		t.Fatal(derr)
+	}
+	if err := json.Unmarshal([]byte(payload), &snap); err != nil {
+		t.Fatal(err)
+	}
+	if snap.ConsumedUsage.Month.Tokens != 154550 || slices.Contains(snap.Degraded, snapshot.DegradedUsage) {
+		t.Fatalf("successful refresh must clear the visible failure: %+v", snap)
+	}
+}
 
 // snapshotAfterRefresh drives the shape ADR 0011 implies: the first call is
 // served from an empty cache and kicks a background refresh, the second reads

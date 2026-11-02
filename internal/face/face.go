@@ -4,21 +4,17 @@
 package face
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/eikrad/codecap/internal/agent"
+	"github.com/eikrad/codecap/internal/creds"
 	"github.com/eikrad/codecap/internal/snapshot"
 )
 
 // CredentialsFileName is Claude Code's Account Home OAuth store on Linux.
-const CredentialsFileName = ".credentials.json"
-
-var (
-	stat     = os.Stat
-	readFile = os.ReadFile
-)
+const CredentialsFileName = creds.CredentialsFileName
 
 func Classify(accountHome string) snapshot.Snapshot {
 	trimmed := strings.TrimSpace(accountHome)
@@ -26,34 +22,26 @@ func Classify(accountHome string) snapshot.Snapshot {
 		return baseSnapshot(snapshot.FaceUnbound, "")
 	}
 
-	info, err := stat(trimmed)
+	info, err := os.Stat(trimmed)
 	if err != nil || !info.IsDir() {
 		return baseSnapshot(snapshot.FaceSignedOut, trimmed)
 	}
+	a, err := agent.Detect(trimmed)
+	if err != nil {
+		return baseSnapshot(snapshot.FaceUnknownAllowance, trimmed)
+	}
+	if a == agent.Codex {
+		// Codex owns its authentication (including keyring storage). The
+		// helper's background app-server read resolves Signed Out; local
+		// Consumed Usage can be shown while that read is pending.
+		return baseSnapshot(snapshot.FaceUnknownAllowance, trimmed)
+	}
 
-	if !hasUsableOAuth(trimmed) {
+	if _, err := creds.Load(trimmed); err != nil {
 		return baseSnapshot(snapshot.FaceSignedOut, trimmed)
 	}
 
 	return baseSnapshot(snapshot.FaceUnknownAllowance, trimmed)
-}
-
-func hasUsableOAuth(accountHome string) bool {
-	path := filepath.Join(accountHome, CredentialsFileName)
-	data, err := readFile(path)
-	if err != nil {
-		return false
-	}
-
-	var payload struct {
-		ClaudeAiOauth struct {
-			AccessToken string `json:"accessToken"`
-		} `json:"claudeAiOauth"`
-	}
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return false
-	}
-	return strings.TrimSpace(payload.ClaudeAiOauth.AccessToken) != ""
 }
 
 func baseSnapshot(face snapshot.Face, accountHome string) snapshot.Snapshot {

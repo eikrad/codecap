@@ -45,6 +45,7 @@ TestCase {
 
     function init() {
         testCase.activations = 0
+        face.markerEnabled = false
     }
 
     // The assertion the missing MouseArea would have failed. A click on the
@@ -67,5 +68,17 @@ TestCase {
         verify(face.implicitWidth > 0)
         verify(face.implicitHeight > 0)
         verify(face.showsRing)
+    }
+
+    function test_marker_reaches_the_ring_and_preserves_clicks() {
+        face.markerEnabled = true
+        face.markerColor = Qt.rgba(0.2, 0.4, 0.6, 1)
+        var marker = findChild(face, "widgetMarker")
+        verify(marker !== null)
+        compare(marker.visible, true)
+        compare(marker.color, face.markerColor)
+        mouseClick(face)
+        mouseClick(face, face.width - marker.width / 2, marker.height / 2)
+        compare(testCase.activations, 2)
     }
 }

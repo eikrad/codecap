@@ -62,3 +62,17 @@ func TestClassifyDirectoryWithOAuthAccessTokenIsUnknownAllowance(t *testing.T) {
 		t.Fatalf("expected %q, got %q", snapshot.FaceUnknownAllowance, got.Face)
 	}
 }
+
+func TestClassifyDoesNotFollowAnotherAccountCredentials(t *testing.T) {
+	home := t.TempDir()
+	target := filepath.Join(t.TempDir(), CredentialsFileName)
+	if err := os.WriteFile(target, []byte(`{"claudeAiOauth":{"accessToken":"test"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(home, CredentialsFileName)); err != nil {
+		t.Fatal(err)
+	}
+	if got := Classify(home); got.Face != snapshot.FaceSignedOut {
+		t.Fatalf("followed credentials symlink: %+v", got)
+	}
+}

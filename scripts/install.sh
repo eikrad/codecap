@@ -59,7 +59,10 @@ codecap installed.
 Next steps:
   1. Add the widget from the Plasma gallery (search "codecap").
   2. Configure Account Home (for example ~/.claude).
-  3. If the widget was already on a panel, restart plasmashell or re-login.
+  3. If Plasma was already running, reload its QML and configuration schema:
+       systemctl --user restart plasma-plasmashell.service
+     Or log out and back in. Existing saved widget preferences are retained.
+     Reopening settings or restarting only the helper is not enough for new fields.
 
 Helper check:
   busctl --user call dev.codecap.Helper /dev/codecap/Helper dev.codecap.Helper \\

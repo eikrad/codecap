@@ -20,6 +20,8 @@ Kirigami.FormLayout {
     // is a two-way write that fights the field's own input.
     property alias cfg_accountHome: accountHomeField.text
     property alias cfg_displayCurrency: displayCurrencyField.text
+    property alias cfg_widgetMarkerEnabled: markerSettings.markerEnabled
+    property alias cfg_widgetMarkerColor: markerSettings.markerColor
 
     RowLayout {
         Kirigami.FormData.label: i18n("Account Home:")
@@ -29,7 +31,7 @@ Kirigami.FormLayout {
         QQC2.TextField {
             id: accountHomeField
             Layout.fillWidth: true
-            placeholderText: i18n("~/.claude")
+            placeholderText: i18n("~/.claude or ~/.codex")
         }
 
         QQC2.Button {
@@ -43,6 +45,11 @@ Kirigami.FormLayout {
         id: displayCurrencyField
         Kirigami.FormData.label: i18n("Display Currency:")
         placeholderText: i18n("Locale default (for example DKK)")
+    }
+
+    WidgetMarkerSettings {
+        id: markerSettings
+        Kirigami.FormData.label: i18n("Widget marker:")
     }
 
     // Not an Item, so it takes no part in the layout.

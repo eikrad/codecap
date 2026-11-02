@@ -4,7 +4,7 @@
 
 Plasma 6 applet plus a Go session helper that shows coding-agent usage and allowance.
 
-v1 targets **Claude Code** on **Plasma 6**. One widget instance is bound to one Account Home (for example `~/.claude`).
+Supports **Claude Code and Codex** on **Plasma 6**. One widget instance is bound to one Account Home (for example `~/.claude` or `~/.codex`). The Agent is identified from that directory's artifacts, so two widget instances can show separate Claude and Codex Accounts.
 
 ## What you see
 
@@ -21,24 +21,42 @@ v1 targets **Claude Code** on **Plasma 6**. One widget instance is bound to one 
 
 List Price is estimated at published API token rates (USD in the helper). The widget converts to your **Display Currency** (locale default, overridable in Configure).
 
-**Allowance** (plan remaining) comes from Claude’s subscription signal and includes usage on other devices. **Consumed Usage** comes only from logs on this machine — so both numbers together answer “what did I use here?” and “how much plan is left overall?”.
+**Allowance** (plan remaining) comes from the Agent's subscription signal and includes usage on other devices. **Consumed Usage** comes only from logs on this machine — so both numbers together answer “what did I use here?” and “how much plan is left overall?”.
+
+For Codex, the helper reads live Allowance through the installed `codex app-server`
+(verified with Codex 0.153.4). The primary five-hour and secondary seven-day
+windows appear as Session and Weekly Allowance, just as for Claude. Missing or
+different windows show Unknown Allowance; a failed read can show visibly stale
+Last-Known Allowance. Local `sessions` and `archived_sessions` logs supply
+Consumed Usage. List Price uses Standard published USD rates when the log does
+not identify a service tier. Unknown models or unpriceable cache writes show
+"List Price unavailable" while retaining tokens.
+
+To distinguish widget instances, open **Configure widget → Widget marker** and
+enable **Show color marker**. Choose a color independently for each widget.
+The marker is off by default and appears beside the compact ring and expanded
+Account label. Session percentages and Allowance colors keep their meaning.
 
 ### When the widget looks “empty”
 
 | What you see | Meaning |
 |--------------|---------|
 | Folder icon | No Account Home chosen — open **Configure widget** |
-| Unlock icon | Account Home exists but you are not signed in with Claude Code there |
+| Unlock icon | Account Home exists but you are not signed in with its Agent there |
 | Question icon | Helper missing, or Allowance not available yet (Consumed Usage may still update) |
 | Ring with % | Signed in and Allowance loaded |
 
 ## Requirements
 
 - **KDE Plasma 6** (Plasma 5 is not supported)
-- **Claude Code** with a signed-in Account Home on this machine
+- **Claude Code or Codex** with a signed-in Account Home on this machine; live Codex Allowance requires `codex` on the helper's PATH
 - **codecap helper** installed (Go session service — see Install). The widget alone is not enough; it talks to the helper over D-Bus and never reads your credentials itself.
 
 ## Install
+
+When upgrading for Codex support, update both helper and plasmoid: snapshot
+schema 2 adds explicit unavailable pricing. The new plasmoid also accepts
+schema-1 snapshots from older helpers, but those helpers remain Claude-only.
 
 ### Arch / Manjaro (recommended)
 
@@ -115,8 +133,9 @@ helper is on `PATH` and D-Bus activation works.
 
 1. Add **codecap** from the Plasma widget gallery (panel, desktop, or tray).
 2. Right-click the widget → **Configure codecap…**
-3. Set **Account Home** to your Claude Code directory (Browse… or type `~/.claude`).
+3. Set **Account Home** to your Agent's directory (Browse… or type `~/.claude` / `~/.codex`).
 4. Optionally set **Display Currency** to an ISO code (for example `DKK`, `EUR`). Leave blank to follow your desktop locale.
+5. Optionally enable **Widget marker → Show color marker** and choose an individual color.
 
 The widget does not store OAuth tokens — only the path to Account Home and display preferences.
 
@@ -127,6 +146,20 @@ The widget does not store OAuth tokens — only the path to Account Home and dis
 - Nothing is sent to third parties except the public FX rate feed (ECB daily XML) for Display Currency conversion.
 
 ## Troubleshooting
+
+**New settings do not enable Apply or do not persist after an upgrade**
+
+The running Plasma applet retains the `contents/config/main.xml` schema it loaded
+when it started. Newly installed QML can show controls whose keys are still absent
+from that in-memory schema. Close the settings dialog and restart Plasma once:
+
+```bash
+systemctl --user restart plasma-plasmashell.service
+```
+
+Alternatively, log out and back in. Reopening the dialog or restarting only the
+codecap helper does not reload the applet's configuration schema. Existing saved
+widget preferences are retained.
 
 **Question icon / “Helper unavailable”**  
 Install the package or run `go run ./cmd/codecap` for development. Check: `busctl --user status dev.codecap.Helper`.

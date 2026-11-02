@@ -46,6 +46,15 @@ _Avoid_: cache, snapshot (as the primary name)
 An Agent-defined rolling period of Allowance (percentage used, reset time, duration). Optional. Claude's primary short window is Session; Claude's longer window is Weekly Allowance. Other Agents may define different windows or none.
 _Avoid_: session (when meaning a generic window), block, billing block
 
+> **Glossary revision 2026-10-28 — Codex support.** The user explicitly requested
+> the same Session and Weekly Allowance presentation for Codex as for Claude.
+> Session now also names Codex's primary Allowance Window when the vendor reports
+> 300 minutes; Weekly Allowance also covers its 10080-minute secondary window.
+> Other durations remain Agent-defined Allowance Windows and are not relabelled
+> as Session/Weekly. Claude-only statements above describe v1; the next version
+> implements both Agents. Consumed Usage remains local tokens and estimated
+> List Price, independently of subscription Allowance.
+
 **Session**:
 Claude's primary short Allowance Window, lasting five hours. The compact face shows percent used and time to reset (Last-Known marked stale; Usage Credit status if Session is exhausted). Session Consumed Usage is local consumption inside the current Session, shown only in the expanded view. List Price, tokens, and Weekly Allowance are not on the compact face.
 _Avoid_: conversation, chat, thread, Five-Hour Allowance

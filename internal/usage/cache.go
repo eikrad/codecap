@@ -4,6 +4,7 @@
 package usage
 
 import (
+	"fmt"
 	"os"
 	"sort"
 	"sync"
@@ -27,10 +28,12 @@ const (
 
 // event is one assistant message, parsed once and kept until it ages out.
 type event struct {
-	at       time.Time
-	uuid     string
-	tokens   int64
-	priceUSD float64
+	at               time.Time
+	identity         string
+	replaceEarlier   bool
+	tokens           int64
+	priceUSD         float64
+	priceUnavailable bool
 }
 
 // fileEntry is the parsed form of one log file, valid while the file's size and
@@ -84,23 +87,27 @@ func (c *Cache) computeAt(accountHome, timezone string, weekStart int32, now tim
 		return snapshot.ConsumedUsage{}, err
 	}
 	if len(files) > maxTrackedFiles {
-		files = files[:maxTrackedFiles]
+		return snapshot.ConsumedUsage{}, fmt.Errorf("too many Consumed Usage log files (limit %d)", maxTrackedFiles)
 	}
-	// Aggregation order decides which duplicate UUID wins, so keep it stable.
+	// Keep duplicate selection and floating-point accumulation deterministic.
 	sort.Strings(files)
 
+	// Cached event slices must stay stable until aggregation finishes; a
+	// concurrent refresh may prune or replace them.
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	cutoff := now.Add(-retention)
-	events := c.refresh(files, cutoff)
+	events, err := c.refresh(files, cutoff)
+	if err != nil {
+		return snapshot.ConsumedUsage{}, err
+	}
 
 	return aggregate(events, periodsAt(now, loc, weekStart)), nil
 }
 
 // refresh re-parses only the files whose size or modification time changed, and
 // returns every retained event in file order.
-func (c *Cache) refresh(files []string, cutoff time.Time) [][]event {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
+func (c *Cache) refresh(files []string, cutoff time.Time) ([][]event, error) {
 	live := make(map[string]struct{}, len(files))
 	batches := make([][]event, 0, len(files))
 
@@ -108,9 +115,11 @@ func (c *Cache) refresh(files []string, cutoff time.Time) [][]event {
 		live[path] = struct{}{}
 
 		info, err := os.Lstat(path)
-		if err != nil || !info.Mode().IsRegular() || info.Size() > maxFileBytes {
-			delete(c.files, path)
-			continue
+		if err != nil {
+			return nil, fmt.Errorf("stat Consumed Usage log: %w", err)
+		}
+		if !info.Mode().IsRegular() || info.Size() > maxFileBytes {
+			return nil, fmt.Errorf("unreadable Consumed Usage log %s: not a bounded regular file", path)
 		}
 
 		entry, ok := c.files[path]
@@ -124,10 +133,9 @@ func (c *Cache) refresh(files []string, cutoff time.Time) [][]event {
 
 		parsed, err := parseEvents(path, c.rates, cutoff)
 		if err != nil {
-			// An unreadable log under-counts rather than failing the whole
-			// refresh, which is the pre-existing behaviour.
-			delete(c.files, path)
-			continue
+			// A partial sum looks authoritative. Preserve the last successful
+			// computation at the caller and report this failed refresh instead.
+			return nil, fmt.Errorf("read Consumed Usage log %q: %w", path, err)
 		}
 		c.files[path] = &fileEntry{size: info.Size(), modTime: info.ModTime(), events: parsed}
 		batches = append(batches, parsed)
@@ -140,48 +148,56 @@ func (c *Cache) refresh(files []string, cutoff time.Time) [][]event {
 			delete(c.files, path)
 		}
 	}
-	return batches
+	return batches, nil
 }
 
 func pruneBefore(events []event, cutoff time.Time) []event {
 	keep := 0
-	for keep < len(events) && events[keep].at.Before(cutoff) {
-		keep++
+	for _, ev := range events {
+		if !ev.at.Before(cutoff) {
+			events[keep] = ev
+			keep++
+		}
 	}
-	if keep == 0 {
-		return events
-	}
-	return events[keep:]
+	clear(events[keep:])
+	return events[:keep]
 }
 
 // aggregate sums retained events into the reported windows, deduplicating by
-// UUID across files in the order they were walked.
+// identity before adding any period. Parsers explicitly mark request totals
+// that may be replaced by a later content block; identities are opaque here.
 func aggregate(batches [][]event, windows periods) snapshot.ConsumedUsage {
 	var usage snapshot.ConsumedUsage
-	seen := make(map[string]struct{})
-
+	indices := make(map[string]int)
+	var unique []event
 	for _, batch := range batches {
 		for _, ev := range batch {
-			if ev.uuid != "" {
-				if _, ok := seen[ev.uuid]; ok {
+			if ev.identity != "" {
+				if index, ok := indices[ev.identity]; ok {
+					if ev.replaceEarlier && !ev.at.Before(unique[index].at) {
+						unique[index] = ev
+					}
 					continue
 				}
-				seen[ev.uuid] = struct{}{}
+				indices[ev.identity] = len(unique)
 			}
+			unique = append(unique, ev)
+		}
+	}
 
-			amount := snapshot.ConsumedPeriod{ListPriceUSD: ev.priceUSD, Tokens: ev.tokens}
-			if inPeriod(ev.at, windows.session) {
-				addPeriod(&usage.Session, amount)
-			}
-			if inPeriod(ev.at, windows.today) {
-				addPeriod(&usage.Today, amount)
-			}
-			if inPeriod(ev.at, windows.week) {
-				addPeriod(&usage.Week, amount)
-			}
-			if inPeriod(ev.at, windows.month) {
-				addPeriod(&usage.Month, amount)
-			}
+	for _, ev := range unique {
+		amount := snapshot.ConsumedPeriod{ListPriceUSD: ev.priceUSD, Tokens: ev.tokens, ListPriceUnavailable: ev.priceUnavailable}
+		if inPeriod(ev.at, windows.session) {
+			addPeriod(&usage.Session, amount)
+		}
+		if inPeriod(ev.at, windows.today) {
+			addPeriod(&usage.Today, amount)
+		}
+		if inPeriod(ev.at, windows.week) {
+			addPeriod(&usage.Week, amount)
+		}
+		if inPeriod(ev.at, windows.month) {
+			addPeriod(&usage.Month, amount)
 		}
 	}
 	return usage

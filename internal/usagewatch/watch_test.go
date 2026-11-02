@@ -12,6 +12,30 @@ import (
 	"time"
 )
 
+func TestCodexNewDateDirectoryAndArchivedLogsTriggerChanged(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changed := make(chan string, 32)
+	manager := NewManager(func(home string) { changed <- home }, 20*time.Millisecond)
+	t.Cleanup(func() { _ = manager.Close() })
+	manager.Ensure(home)
+	for _, dir := range []string{"sessions/2026/10/28", "archived_sessions"} {
+		path := filepath.Join(home, dir)
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		waitForChange(t, changed)
+		if err := os.WriteFile(filepath.Join(path, "rollout.jsonl"), []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := waitForChange(t, changed); got != home {
+			t.Fatalf("Changed(%q), want %q", got, home)
+		}
+	}
+}
+
 func TestEnsureNotifiesWhenProjectLogChanges(t *testing.T) {
 	accountHome := t.TempDir()
 	projectsDir := filepath.Join(accountHome, "projects", "demo")

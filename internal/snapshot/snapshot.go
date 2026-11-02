@@ -7,7 +7,7 @@ package snapshot
 //
 // Helper and plasmoid are installed separately and versioned separately, so a
 // field rename between them is otherwise a silent breakage.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // Degraded reasons say why a snapshot is incomplete. They are stable codes, not
 // messages: the plasmoid owns the wording, and an error string could carry a
@@ -56,8 +56,9 @@ type UsageCreditSpend struct {
 }
 
 type ConsumedPeriod struct {
-	ListPriceUSD float64 `json:"list_price_usd"`
-	Tokens       int64   `json:"tokens"`
+	ListPriceUSD         float64 `json:"list_price_usd"`
+	Tokens               int64   `json:"tokens"`
+	ListPriceUnavailable bool    `json:"list_price_unavailable"`
 }
 
 type ConsumedUsage struct {

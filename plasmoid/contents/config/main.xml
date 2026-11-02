@@ -10,6 +10,12 @@
     <entry name="displayCurrency" type="String">
       <default></default>
     </entry>
+    <entry name="widgetMarkerEnabled" type="Bool">
+      <default>false</default>
+    </entry>
+    <entry name="widgetMarkerColor" type="String">
+      <default></default>
+    </entry>
     <entry name="fxRateUsdToDisplay" type="Double">
       <default>1.0</default>
     </entry>

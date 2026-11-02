@@ -14,6 +14,8 @@ Item {
     property real usedPercent: 0
     property bool stale: false
     property bool showNumeral: true
+    property bool markerEnabled: false
+    property color markerColor: Kirigami.Theme.highlightColor
 
     implicitWidth: Kirigami.Units.gridUnit * 2
     implicitHeight: implicitWidth
@@ -90,5 +92,15 @@ Item {
         level: 5
         opacity: stale ? 0.65 : 1.0
         text: i18n("%1%", Math.round(root.usedPercent))
+    }
+
+    WidgetMarker {
+        objectName: "widgetMarker"
+        anchors.top: parent.top
+        anchors.right: parent.right
+        width: Math.max(4, Math.min(root.width, root.height) * 0.2)
+        height: width
+        visible: root.markerEnabled
+        color: root.markerColor
     }
 }

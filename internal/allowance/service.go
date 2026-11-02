@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/eikrad/codecap/internal/agent"
+	"github.com/eikrad/codecap/internal/codex"
 	"github.com/eikrad/codecap/internal/creds"
 	"github.com/eikrad/codecap/internal/httpx"
 	"github.com/eikrad/codecap/internal/snapshot"
@@ -34,6 +36,7 @@ type Service struct {
 	TokenBaseURL string
 	LastKnown    *LastKnownStore
 	Now          func() time.Time
+	CodexFetch   func(context.Context, string) (codex.Result, error)
 }
 
 func NewService(lastKnown *LastKnownStore) *Service {
@@ -43,45 +46,57 @@ func NewService(lastKnown *LastKnownStore) *Service {
 		TokenBaseURL: DefaultTokenBaseURL,
 		LastKnown:    lastKnown,
 		Now:          func() time.Time { return time.Now().UTC() },
+		CodexFetch:   codex.FetchAllowance,
 	}
 }
 
 func (s *Service) Resolve(ctx context.Context, accountHome string) (SnapshotFields, error) {
 	now := s.Now()
-	oauth, err := creds.EnsureAccessToken(ctx, accountHome, s.HTTPClient, s.TokenBaseURL, now)
+	a, err := agent.Detect(accountHome)
 	if err != nil {
-		if errors.Is(err, creds.ErrRefreshRejected) {
-			// Signed Out is a usable face, not a failure — but the cause is
-			// reported so it reaches the journal, and so the poller backs off
-			// instead of re-attempting a rejected grant every minute.
-			return SnapshotFields{Face: snapshot.FaceSignedOut, UsageCredit: "none"},
-				fmt.Errorf("account home %s is signed out: %w", accountHome, err)
-		}
 		return s.fallback(accountHome, now, err)
 	}
+	var result Result
+	if a == agent.Codex {
+		var fetched codex.Result
+		fetched, err = s.CodexFetch(ctx, accountHome)
+		result = Result{Session: fetched.Session, Weekly: fetched.Weekly, UsageCredit: "none"}
+	} else {
+		result, err = s.fetchClaude(ctx, accountHome, now)
+	}
+	if errors.Is(err, codex.ErrSignedOut) || errors.Is(err, creds.ErrRefreshRejected) {
+		return SnapshotFields{Face: snapshot.FaceSignedOut, UsageCredit: "none"}, fmt.Errorf("account home %s is signed out: %w", accountHome, err)
+	}
+	if err != nil {
+		return s.fallback(accountHome, now, err)
+	}
+	return s.remember(accountHome, now, result)
+}
 
+func (s *Service) fetchClaude(ctx context.Context, accountHome string, now time.Time) (Result, error) {
+	oauth, err := creds.EnsureAccessToken(ctx, accountHome, s.HTTPClient, s.TokenBaseURL, now)
+	if err != nil {
+		return Result{}, err
+	}
 	client := NewClient(s.HTTPClient, s.APIBaseURL)
 	result, err := client.FetchUsage(ctx, oauth.AccessToken)
-	if err != nil {
-		// Only a 401 justifies burning the refresh grant. A 403 or 429 means
-		// wait, and forcing a refresh for those rotated the grant every minute.
-		if IsUnauthorized(err) {
-			refreshedOAuth, refreshErr := creds.RefreshAccessToken(ctx, accountHome, s.HTTPClient, s.TokenBaseURL)
-			if refreshErr != nil {
-				if errors.Is(refreshErr, creds.ErrRefreshRejected) {
-					return SnapshotFields{Face: snapshot.FaceSignedOut, UsageCredit: "none"},
-						fmt.Errorf("account home %s is signed out: %w", accountHome, refreshErr)
-				}
-				return s.fallback(accountHome, now, refreshErr)
-			}
-			result, err = client.FetchUsage(ctx, refreshedOAuth.AccessToken)
-		}
+	// Only a 401 justifies refreshing the grant. A 403/429 must back off.
+	if IsUnauthorized(err) {
+		oauth, err = creds.RefreshAccessToken(ctx, accountHome, s.HTTPClient, s.TokenBaseURL)
 		if err != nil {
-			return s.fallback(accountHome, now, err)
+			return Result{}, err
 		}
+		return client.FetchUsage(ctx, oauth.AccessToken)
 	}
+	return result, err
+}
 
+func (s *Service) remember(accountHome string, now time.Time, result Result) (SnapshotFields, error) {
 	fetchedAt := now.Unix()
+	fields := SnapshotFields{
+		Face: snapshot.FaceReady, SessionAllowance: result.Session, WeeklyAllowance: result.Weekly,
+		UsageCredit: result.UsageCredit, UsageCreditSpend: result.UsageCreditSpend, FetchedAt: fetchedAt,
+	}
 	if s.LastKnown != nil {
 		if saveErr := s.LastKnown.Save(accountHome, CachedAllowance{
 			FetchedAt:        fetchedAt,
@@ -92,25 +107,11 @@ func (s *Service) Resolve(ctx context.Context, accountHome string) (SnapshotFiel
 		}); saveErr != nil {
 			// Not fatal: the live result stands, only the offline fallback is
 			// missing. Reported so a broken cache directory is visible.
-			return SnapshotFields{
-				Face:             snapshot.FaceReady,
-				SessionAllowance: result.Session,
-				WeeklyAllowance:  result.Weekly,
-				UsageCredit:      result.UsageCredit,
-				UsageCreditSpend: result.UsageCreditSpend,
-				FetchedAt:        fetchedAt,
-			}, fmt.Errorf("cache last-known allowance: %w", saveErr)
+			return fields, fmt.Errorf("cache last-known allowance: %w", saveErr)
 		}
 	}
 
-	return SnapshotFields{
-		Face:             snapshot.FaceReady,
-		SessionAllowance: result.Session,
-		WeeklyAllowance:  result.Weekly,
-		UsageCredit:      result.UsageCredit,
-		UsageCreditSpend: result.UsageCreditSpend,
-		FetchedAt:        fetchedAt,
-	}, nil
+	return fields, nil
 }
 
 func (s *Service) fallback(accountHome string, now time.Time, cause error) (SnapshotFields, error) {
@@ -131,5 +132,5 @@ func (s *Service) fallback(accountHome string, now time.Time, cause error) (Snap
 		UsageCredit:      cached.UsageCredit,
 		UsageCreditSpend: cached.UsageCreditSpend,
 		FetchedAt:        cached.FetchedAt,
-	}, nil
+	}, cause
 }
