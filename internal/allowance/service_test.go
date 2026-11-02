@@ -256,8 +256,8 @@ func TestServiceResolveUsesLastKnownWhenFetchFails(t *testing.T) {
 	svc.TokenBaseURL = usageServer.URL
 
 	got, err := svc.Resolve(context.Background(), accountHome)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
+	if err == nil {
+		t.Fatal("Last-Known Allowance must retain the fetch error so the poller backs off")
 	}
 	if got.Face != snapshot.FaceReady {
 		t.Fatalf("face: got %q", got.Face)

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/eikrad/codecap/internal/accounthome"
+	"github.com/eikrad/codecap/internal/agent"
 	"github.com/eikrad/codecap/internal/allowance"
 	"github.com/eikrad/codecap/internal/face"
 	"github.com/eikrad/codecap/internal/httpx"
@@ -62,10 +63,11 @@ type usageKey struct {
 type accountState struct {
 	mu sync.Mutex
 
-	key        usageKey
-	consumed   snapshot.ConsumedUsage
-	consumedAt time.Time
-	consumedOK bool
+	key              usageKey
+	consumed         snapshot.ConsumedUsage
+	consumedAt       time.Time
+	consumedOK       bool
+	consumedFailedAt time.Time
 
 	allowanceFields allowance.SnapshotFields
 	allowanceAt     time.Time
@@ -107,6 +109,11 @@ func (s *Server) GetSnapshot(rawAccountHome, timezone string, weekStart int32) (
 	home, err := accounthome.Validate(rawAccountHome)
 	if err != nil {
 		return "", dbus.MakeFailedError(err)
+	}
+	if home != "" {
+		if _, err := agent.Detect(home); err != nil {
+			return "", dbus.MakeFailedError(err)
+		}
 	}
 
 	select {
@@ -235,10 +242,19 @@ func (s *Server) fillFromCache(snap *snapshot.Snapshot, key usageKey) {
 	if state.key != key {
 		// A different timezone or week start needs its own aggregation.
 		state.consumedOK = false
+		state.consumedAt = time.Time{}
+		state.consumedFailedAt = time.Time{}
 		state.key = key
 	}
 	consumedOK, allowanceOK := state.consumedOK, state.allowanceOK
-	consumedFresh := consumedOK && now.Sub(state.consumedAt) < consumedTTL
+	consumedFailed := !state.consumedFailedAt.IsZero()
+	attemptedAt := state.consumedAt
+	if consumedFailed {
+		attemptedAt = state.consumedFailedAt
+	}
+	// Failed attempts get the same retry bound as successful reads. Without
+	// it, Changed -> GetSnapshot -> failed refresh -> Changed can loop.
+	consumedFresh := !attemptedAt.IsZero() && now.Sub(attemptedAt) < consumedTTL
 	allowanceFresh := allowanceOK && now.Sub(state.allowanceAt) < allowanceTTL
 	if consumedOK {
 		snap.ConsumedUsage = state.consumed
@@ -252,10 +268,10 @@ func (s *Server) fillFromCache(snap *snapshot.Snapshot, key usageKey) {
 	}
 
 	switch {
-	case !consumedOK && !allowanceOK:
+	case !consumedOK && !allowanceOK && !consumedFailed:
 		snap.Degraded = append(snap.Degraded, snapshot.DegradedPending)
 	default:
-		if !consumedOK {
+		if !consumedOK || consumedFailed {
 			snap.Degraded = append(snap.Degraded, snapshot.DegradedUsage)
 		}
 		if !allowanceOK {
@@ -331,18 +347,20 @@ func (s *Server) refreshUsage(accountHome string, key usageKey) bool {
 		return false
 	}
 	computed, err := s.usage.Compute(accountHome, key.timezone, key.weekStart)
-	if err != nil {
-		log.Printf("compute consumed usage failed for %s: %v", accountHome, err)
-		return false
-	}
-
 	state := s.state(accountHome)
 	state.mu.Lock()
+	defer state.mu.Unlock()
+	if err != nil {
+		log.Printf("compute consumed usage failed for %s: %v", accountHome, err)
+		changed := state.consumedFailedAt.IsZero()
+		state.consumedFailedAt = s.now()
+		return changed
+	}
 	state.consumed = computed
 	state.consumedAt = s.now()
 	state.consumedOK = true
+	state.consumedFailedAt = time.Time{}
 	state.key = key
-	state.mu.Unlock()
 	return true
 }
 

@@ -22,6 +22,15 @@ const readFace = (file) => fs.readFileSync(path.join(faceDocuments, file), "utf8
 const Logic = loadLogic();
 const colors = { disabled: "gray", negative: "red", neutral: "orange", highlight: "blue" };
 
+test("unknown Codex List Price stays unavailable while tokens remain visible", () => {
+    const snap = Logic.parseSnapshot(JSON.stringify({face: "ready", consumed_usage: {
+        today: {tokens: 1234, list_price_usd: 0, list_price_unavailable: true}
+    }}));
+    assert.equal(snap.consumed_usage.today.tokens, 1234);
+    assert.equal(snap.consumed_usage.today.list_price_unavailable, true);
+    assert.equal(Logic.staleSnapshot(snap).consumed_usage.today.list_price_unavailable, true);
+});
+
 test("stripFileScheme turns a QML url into a path", () => {
     assert.equal(Logic.stripFileScheme("file:///home/me"), "/home/me");
     assert.equal(Logic.stripFileScheme("file:///home/my%20name"), "/home/my name");
@@ -90,7 +99,7 @@ test("normalizeSnapshot fills the periods a partial payload leaves out", () => {
         consumed_usage: { session: { list_price_usd: 1.2, tokens: 500 } }
     });
     for (const period of ["today", "week", "month"]) {
-        assert.deepEqual(snap.consumed_usage[period], { list_price_usd: 0, tokens: 0 });
+        assert.deepEqual(snap.consumed_usage[period], { list_price_usd: 0, tokens: 0, list_price_unavailable: false });
     }
 });
 

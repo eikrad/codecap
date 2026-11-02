@@ -80,6 +80,7 @@ else
 fi
 run test         ''             make test
 run test-install ''             make test-install
+run vulncheck    ''             make vulncheck
 
 echo
 if [ -n "$skipped" ]; then

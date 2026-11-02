@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/eikrad/codecap/internal/agent"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -104,8 +105,12 @@ func (m *Manager) Ensure(accountHome string) {
 	}
 	m.mu.Unlock()
 
-	projectsDir := filepath.Join(accountHome, "projects")
-	info, err := os.Stat(projectsDir)
+	a, err := agent.Detect(accountHome)
+	if err != nil {
+		log.Printf("identify usage watcher: %v", err)
+		return
+	}
+	info, err := os.Stat(accountHome)
 	if err != nil || !info.IsDir() {
 		return
 	}
@@ -116,10 +121,23 @@ func (m *Manager) Ensure(accountHome string) {
 		return
 	}
 
-	if err := addRecursive(watcher, projectsDir); err != nil {
-		log.Printf("watch usage directory %s: %v", projectsDir, err)
+	if err := watcher.Add(accountHome); err != nil {
+		log.Printf("watch Account Home %s: %v", accountHome, err)
 		_ = watcher.Close()
 		return
+	}
+	var roots []string
+	for _, dir := range a.LogDirectories() {
+		root := filepath.Join(accountHome, dir)
+		roots = append(roots, root)
+		if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err := addRecursive(watcher, root); err != nil {
+			log.Printf("watch usage directory %s: %v", root, err)
+			_ = watcher.Close()
+			return
+		}
 	}
 
 	instance := &watchInstance{
@@ -139,7 +157,7 @@ func (m *Manager) Ensure(accountHome string) {
 	m.watchers[accountHome] = instance
 	m.mu.Unlock()
 
-	go m.loop(accountHome, projectsDir, instance)
+	go m.loop(accountHome, roots, instance)
 }
 
 // evictLocked closes the least recently requested watcher to make room.
@@ -196,7 +214,7 @@ func (m *Manager) Close() error {
 	return errors.Join(errs...)
 }
 
-func (m *Manager) loop(accountHome, projectsDir string, instance *watchInstance) {
+func (m *Manager) loop(accountHome string, roots []string, instance *watchInstance) {
 	for {
 		select {
 		case <-instance.done:
@@ -208,6 +226,13 @@ func (m *Manager) loop(accountHome, projectsDir string, instance *watchInstance)
 			if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Rename|fsnotify.Remove) == 0 {
 				continue
 			}
+			underLogs := false
+			for _, root := range roots {
+				underLogs = underLogs || isUnderDir(event.Name, root)
+			}
+			if !underLogs {
+				continue
+			}
 
 			if event.Op&fsnotify.Create != 0 {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
@@ -217,9 +242,7 @@ func (m *Manager) loop(accountHome, projectsDir string, instance *watchInstance)
 				}
 			}
 
-			if isUnderDir(event.Name, projectsDir) {
-				m.notify(accountHome, instance)
-			}
+			m.notify(accountHome, instance)
 		case err, ok := <-instance.watcher.Errors:
 			if !ok {
 				return

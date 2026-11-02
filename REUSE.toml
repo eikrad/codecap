@@ -13,7 +13,7 @@ SPDX-FileCopyrightText = "2026 eikrad <eikef.rades@protonmail.com>"
 SPDX-License-Identifier = "GPL-2.0-or-later"
 
 [[annotations]]
-path = ["internal/snapshot/testdata/**"]
+path = ["internal/snapshot/testdata/**", "internal/usage/testdata/**", "internal/codex/testdata/**"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 eikrad <eikef.rades@protonmail.com>"
 SPDX-License-Identifier = "GPL-2.0-or-later"

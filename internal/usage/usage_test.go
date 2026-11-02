@@ -4,14 +4,224 @@
 package usage
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/eikrad/codecap/internal/snapshot"
 )
+
+// This excerpt was captured from a real Claude Code log on 2026-10-28.
+// Only message content and unrelated envelope fields were removed. The ten
+// content blocks share one API request's usage, despite having distinct UUIDs.
+func TestConsumedUsageCountsAnAPIRequestOnceAcrossContentBlocks(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, "projects", "sample")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile("testdata/claude-content-blocks.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "events.jsonl"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 16, 23, 20, 0, 0, time.UTC)
+	got, err := computeAt(home, "UTC", 1, now, DefaultRates())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One request: 507132 tokens and $0.4853215 at the existing Opus card.
+	for name, period := range map[string]snapshot.ConsumedPeriod{"session": got.Session, "today": got.Today, "week": got.Week, "month": got.Month} {
+		if period.Tokens != 507132 || math.Abs(period.ListPriceUSD-0.4853215) > 1e-9 {
+			t.Errorf("%s counts content blocks repeatedly: got %+v, want 507132 tokens and $0.4853215", name, period)
+		}
+	}
+}
+
+// Captured from this desktop's Codex 0.153.4 logs on 2026-10-28; only
+// session/context metadata unrelated to accounting was omitted. Repeated
+// token_count notifications carry the same totals and must not add usage.
+func TestCodexConsumedUsageCountsCumulativeTokensOnce(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, "sessions", "2026", "10", "28")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile("testdata/codex-token-counts.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "rollout.jsonl"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := computeAt(home, "UTC", 1, time.Date(2026, 10, 28, 16, 0, 0, 0, time.UTC), DefaultRates())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Today.Tokens != 154550 {
+		t.Fatalf("got %d tokens, want 154550 (reasoning and cached input are subsets)", got.Today.Tokens)
+	}
+	// Standard Sol: 11111 uncached input, 143104 cached input, 335 output.
+	if math.Abs(got.Today.ListPriceUSD-0.0398824) > 1e-9 {
+		t.Fatalf("List Price = %v, want $0.0398824", got.Today.ListPriceUSD)
+	}
+}
+
+func TestClaudeConsumedUsageUsesTheLastTotalsOfAnAPIRequest(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, "projects", "sample")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A second real excerpt: early blocks report 16 output tokens; the last
+	// block reports 489. Keeping the first block would silently undercount.
+	data, err := os.ReadFile("testdata/claude-updated-totals.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "events.jsonl"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := computeAt(home, "UTC", 1, time.Date(2026, 10, 8, 9, 10, 0, 0, time.UTC), DefaultRates())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Today.Tokens != 55808 || math.Abs(got.Today.ListPriceUSD-.037099) > 1e-9 {
+		t.Fatalf("latest request totals lost: %+v", got.Today)
+	}
+}
+
+func TestCodexArchivedCopiesAndUnknownModelsDoNotInventConsumptionOrPrices(t *testing.T) {
+	home := t.TempDir()
+	data, err := os.ReadFile("testdata/codex-token-counts.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Derived from the captured artifact: simulate a model released after our
+	// price table, and an archive/fork carrying an identical history.
+	data = bytes.ReplaceAll(data, []byte("gpt-6.1-sol"), []byte("future-model"))
+	for _, root := range []string{"sessions", "archived_sessions"} {
+		dir := filepath.Join(home, root)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "rollout.jsonl"), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := computeAt(home, "UTC", 1, time.Date(2026, 10, 28, 16, 0, 0, 0, time.UTC), DefaultRates())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Today.Tokens != 154550 || !got.Today.ListPriceUnavailable {
+		t.Fatalf("lost tokens or invented a price: %+v", got.Today)
+	}
+}
+
+func TestUnreadableConsumedUsageDoesNotBecomeASuccessfulZero(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, "sessions")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile("testdata/codex-token-counts.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "rollout.jsonl")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cache := NewCache(DefaultRates())
+	now := time.Date(2026, 10, 28, 16, 0, 0, 0, time.UTC)
+	if _, err := cache.computeAt(home, "UTC", 1, now); err != nil {
+		t.Fatal(err)
+	}
+	// Replace the log root with a regular file. This is unreadable regardless
+	// of the parser's record-size policy and must not become a successful zero.
+	if err := os.Rename(dir, filepath.Join(home, "saved_sessions")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.computeAt(home, "UTC", 1, now); err == nil {
+		t.Fatal("unreadable log reported as successful Consumed Usage")
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) { clear(p); return len(p), nil }
+
+func TestLogRecordSizeRemainsBounded(t *testing.T) {
+	// Stream bytes without allocating a second record-sized input buffer.
+	reader := io.LimitReader(zeroReader{}, maxLogRecordBytes+1)
+	if _, err := parseEventsFrom(reader, DefaultRates(), time.Time{}); err == nil {
+		t.Fatal("unbounded log record accepted")
+	}
+}
+
+func TestIncompleteCodexCountersAreAnErrorRatherThanAReset(t *testing.T) {
+	data, err := os.ReadFile("testdata/codex-token-counts.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Damage one field of the real artifact; a missing cumulative counter is
+	// not a zero baseline from which later totals may be counted again.
+	data = bytes.Replace(data, []byte("total_token_usage"), []byte("missing_token_usage"), 1)
+	if _, err := parseEventsFrom(bytes.NewReader(data), DefaultRates(), time.Time{}); err == nil {
+		t.Fatal("missing cumulative counters were silently accepted")
+	}
+}
+
+func TestLargeClaudeAttachmentDoesNotHideConsumedUsage(t *testing.T) {
+	// Metadata excerpt captured from a real 5,353,352-byte attachment record
+	// on 2026-11-02. Its private attachment contents are deliberately omitted.
+	// Synthetic padding restores the size without retaining user content.
+	metadata, err := os.ReadFile("testdata/claude-large-record-envelope.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attachment map[string]any
+	if err := json.Unmarshal(metadata, &attachment); err != nil {
+		t.Fatal(err)
+	}
+	attachment["_test_padding"] = strings.Repeat("x", 5353352)
+	large, err := json.Marshal(attachment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage, err := os.ReadFile("testdata/claude-content-blocks.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := append(append(large, '\n'), usage...)
+	home := t.TempDir()
+	dir := filepath.Join(home, "projects", "sample")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "events.jsonl"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := computeAt(home, "UTC", 1, time.Date(2026, 10, 16, 23, 20, 0, 0, time.UTC), DefaultRates())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Today.Tokens != 507132 {
+		t.Fatalf("large attachment hid real consumption: %+v", got.Today)
+	}
+}
 
 func TestComputeAtAggregatesPeriodsByTimezoneAndWeekStart(t *testing.T) {
 	accountHome := t.TempDir()

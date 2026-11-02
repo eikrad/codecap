@@ -4,6 +4,7 @@
 PREFIX ?= /usr
 DESTDIR ?=
 GO ?= go
+MODULE_GO_VERSION := $(shell awk '$$1 == "go" { print $$2; exit }' go.mod)
 
 BINARY := codecap
 BINDIR := $(PREFIX)/bin
@@ -73,7 +74,7 @@ DIST := $(BINARY)-$(VERSION).tar.gz
 
 .PHONY: build install uninstall dist test test-plasmoid \
 	test-plasmoid-qml test-plasmoid-qml-plasma test-plasmoid-qml-dbus \
-	test-install check-version lint fmt-check lint-go lint-sh lint-qml ci clean
+	test-install check-version lint fmt-check lint-go lint-sh lint-qml vulncheck ci clean
 
 build:
 	$(GO) build $(BUILD_FLAGS) -o bin/$(BINARY) ./cmd/codecap
@@ -260,7 +261,12 @@ test-plasmoid-qml-plasma:
 test-plasmoid-qml-dbus:
 	QMLTESTRUNNER="$(QMLTESTRUNNER)" scripts/run-qml-dbus-tests.sh
 
-ci: check-version lint test test-install
+# Scan the same standard library as CI, even when the developer's installed
+# Go is a different version. Keep this command shared with the pre-PR gate.
+vulncheck:
+	GOTOOLCHAIN=go$(MODULE_GO_VERSION) $(GO) run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+ci: check-version lint test test-install vulncheck
 
 test-install: build
 	rm -rf .install-test .install-test-local

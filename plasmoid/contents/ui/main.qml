@@ -21,6 +21,9 @@ PlasmoidItem {
     // mirrored into real properties whose own change signals do fire.
     readonly property string configuredAccountHome: Plasmoid.configuration.accountHome
     readonly property string configuredCurrency: Plasmoid.configuration.displayCurrency
+    readonly property bool configuredMarkerEnabled: Plasmoid.configuration.widgetMarkerEnabled
+    readonly property string configuredMarkerColor: Plasmoid.configuration.widgetMarkerColor
+    readonly property color widgetMarkerColor: configuredMarkerColor !== "" ? configuredMarkerColor : Kirigami.Theme.highlightColor
 
     function resolvedAccountHome() {
         return Logic.expandPath(configuredAccountHome, homeDir)
@@ -155,8 +158,11 @@ PlasmoidItem {
         xhr.send()
     }
 
-    function formatListPrice(usd) {
-        return Logic.formatMoney(usd, fxRate, displayCurrency, fxUsingUsdFallback, Qt.locale())
+    function formatListPrice(period) {
+        if (period.list_price_unavailable) {
+            return i18n("List Price unavailable")
+        }
+        return Logic.formatMoney(period.list_price_usd, fxRate, displayCurrency, fxUsingUsdFallback, Qt.locale())
     }
 
     // The helper says why a snapshot is incomplete; the wording is ours.
@@ -251,6 +257,8 @@ PlasmoidItem {
         isBound: root.isBound
         usedPercent: root.snapshot.session_allowance.used_percent
         stale: root.snapshot.session_allowance.stale
+        markerEnabled: root.configuredMarkerEnabled
+        markerColor: root.widgetMarkerColor
         onActivated: root.expanded = !root.expanded
     }
 
@@ -266,7 +274,7 @@ PlasmoidItem {
                 visible: !root.isBound
                 icon.name: "folder-open-symbolic"
                 text: i18n("No Account Home selected.")
-                explanation: i18n("Open widget configuration and choose an Account Home (for example ~/.claude).")
+                explanation: i18n("Open widget configuration and choose an Account Home (for example ~/.claude or ~/.codex).")
             }
 
             Kirigami.PlaceholderMessage {
@@ -282,14 +290,24 @@ PlasmoidItem {
                 visible: root.isBound && root.helperReachable && root.snapshot.face === "signed_out"
                 icon.name: "unlock-symbolic"
                 text: i18n("Signed out.")
-                explanation: i18n("Sign in with Claude Code for this Account Home.")
+                explanation: i18n("Sign in with the Agent for this Account Home (Claude Code or Codex).")
             }
 
-            PlasmaComponents.Label {
+            RowLayout {
                 Layout.fillWidth: true
                 visible: root.isBound && root.snapshot.account_label !== ""
-                text: root.snapshot.account_label
-                font.bold: true
+                spacing: Kirigami.Units.smallSpacing
+
+                WidgetMarker {
+                    visible: root.configuredMarkerEnabled
+                    color: root.widgetMarkerColor
+                }
+
+                PlasmaComponents.Label {
+                    Layout.fillWidth: true
+                    text: root.snapshot.account_label
+                    font.bold: true
+                }
             }
 
             PlasmaComponents.Label {
@@ -348,25 +366,25 @@ PlasmoidItem {
 
                 PlasmaComponents.Label {
                     Kirigami.FormData.label: i18n("Session")
-                    text: root.formatListPrice(root.snapshot.consumed_usage.session.list_price_usd) + "\n" + i18n("%1 tokens", Logic.formatTokens(root.snapshot.consumed_usage.session.tokens, Qt.locale()))
+                    text: root.formatListPrice(root.snapshot.consumed_usage.session) + "\n" + i18n("%1 tokens", Logic.formatTokens(root.snapshot.consumed_usage.session.tokens, Qt.locale()))
                     wrapMode: Text.Wrap
                 }
 
                 PlasmaComponents.Label {
                     Kirigami.FormData.label: i18n("Today")
-                    text: root.formatListPrice(root.snapshot.consumed_usage.today.list_price_usd) + "\n" + i18n("%1 tokens", Logic.formatTokens(root.snapshot.consumed_usage.today.tokens, Qt.locale()))
+                    text: root.formatListPrice(root.snapshot.consumed_usage.today) + "\n" + i18n("%1 tokens", Logic.formatTokens(root.snapshot.consumed_usage.today.tokens, Qt.locale()))
                     wrapMode: Text.Wrap
                 }
 
                 PlasmaComponents.Label {
                     Kirigami.FormData.label: i18n("This week")
-                    text: root.formatListPrice(root.snapshot.consumed_usage.week.list_price_usd) + "\n" + i18n("%1 tokens", Logic.formatTokens(root.snapshot.consumed_usage.week.tokens, Qt.locale()))
+                    text: root.formatListPrice(root.snapshot.consumed_usage.week) + "\n" + i18n("%1 tokens", Logic.formatTokens(root.snapshot.consumed_usage.week.tokens, Qt.locale()))
                     wrapMode: Text.Wrap
                 }
 
                 PlasmaComponents.Label {
                     Kirigami.FormData.label: i18n("This month")
-                    text: root.formatListPrice(root.snapshot.consumed_usage.month.list_price_usd) + "\n" + i18n("%1 tokens", Logic.formatTokens(root.snapshot.consumed_usage.month.tokens, Qt.locale()))
+                    text: root.formatListPrice(root.snapshot.consumed_usage.month) + "\n" + i18n("%1 tokens", Logic.formatTokens(root.snapshot.consumed_usage.month.tokens, Qt.locale()))
                     wrapMode: Text.Wrap
                 }
             }

@@ -4,6 +4,7 @@
 package usage
 
 import (
+	"bytes"
 	"fmt"
 	"math/rand"
 	"os"
@@ -12,6 +13,32 @@ import (
 	"testing"
 	"time"
 )
+
+// Repeated content blocks are the normal Claude shape that the old synthetic
+// one-message/one-UUID corpus does not represent. Use the captured artifact.
+func BenchmarkAggregateRequestBlocks(b *testing.B) {
+	data, err := os.ReadFile("testdata/claude-content-blocks.jsonl")
+	if err != nil {
+		b.Fatal(err)
+	}
+	blocks, err := parseEventsFrom(bytes.NewReader(data), DefaultRates(), time.Time{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	var events []event
+	for request := 0; request < 2000; request++ {
+		for _, block := range blocks {
+			block.identity = fmt.Sprintf("request:%d", request)
+			events = append(events, block)
+		}
+	}
+	windows := periodsAt(time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC), time.UTC, 1)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = aggregate([][]event{events}, windows)
+	}
+}
 
 // buildAccountHome writes a log corpus shaped like a real ~/.claude/projects.
 func buildAccountHome(tb testing.TB, files, perFile int) string {

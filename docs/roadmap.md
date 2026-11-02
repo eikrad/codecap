@@ -36,4 +36,20 @@ working. Findings: [`audit-2026-08-22.md`](./audit-2026-08-22.md). Order of work
 
 ## Not v1
 
-Other Agents, colour picker, threshold sliders, idle-exit helper, Flatpak/Snap helper, `.deb` / RPM / OBS as a ship gate, Weekly % on the compact tooltip.
+Agents beyond Claude and Codex, colour picker, threshold sliders, idle-exit helper, Flatpak/Snap helper, `.deb` / RPM / OBS as a ship gate, Weekly % on the compact tooltip.
+
+## Codex extension · 2026-10-28
+
+Requested: reuse Session and Weekly Allowance presentation for Codex, and fix
+repeated Claude request accounting affecting every Consumed Usage period.
+Implementation and verification contract: [ADR 0017](adr/0017-codex-account-home.md).
+Real local log fixtures and a live Codex Allowance response are captured;
+final installed-widget desktop acceptance remains separate from automated gates.
+
+## Optional widget marker · 2026-11-02
+
+Requested: distinguish widget instances with a per-widget color marker.
+The user selected color identification without panel short names or Agent logos.
+The explicit visual revision is documented in design.md and ADR 0018.
+Desktop acceptance completed 2026-11-02: the user confirmed persistence after
+reloading plasmashell and accepted the small marker's appearance.

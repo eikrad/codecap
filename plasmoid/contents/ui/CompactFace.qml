@@ -29,6 +29,8 @@ MouseArea {
     property bool isBound: false
     property real usedPercent: 0
     property bool stale: false
+    property bool markerEnabled: false
+    property color markerColor: Kirigami.Theme.highlightColor
 
     // Whether the ring is drawn rather than a face icon. Exposed so a test can
     // tell a working compact face from an empty box that merely accepts clicks.
@@ -54,6 +56,8 @@ MouseArea {
         isBound: root.isBound
         usedPercent: root.usedPercent
         stale: root.stale
+        markerEnabled: root.markerEnabled
+        markerColor: root.markerColor
         showNumeral: root.width >= Kirigami.Units.gridUnit * 2.5
     }
 }

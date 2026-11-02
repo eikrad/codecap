@@ -52,10 +52,10 @@ function emptySnapshot() {
         usage_credit: "none",
         usage_credit_spend: { used_usd: 0, limit_usd: 0 },
         consumed_usage: {
-            session: { list_price_usd: 0, tokens: 0 },
-            today: { list_price_usd: 0, tokens: 0 },
-            week: { list_price_usd: 0, tokens: 0 },
-            month: { list_price_usd: 0, tokens: 0 }
+            session: { list_price_usd: 0, tokens: 0, list_price_unavailable: false },
+            today: { list_price_usd: 0, tokens: 0, list_price_unavailable: false },
+            week: { list_price_usd: 0, tokens: 0, list_price_unavailable: false },
+            month: { list_price_usd: 0, tokens: 0, list_price_unavailable: false }
         },
         fetched_at: 0
     }
@@ -91,12 +91,14 @@ function normalizeUsageCreditSpend(value) {
 
 function normalizePeriod(value) {
     if (!value || typeof value !== "object") {
-        return { list_price_usd: 0, tokens: 0 }
+        return { list_price_usd: 0, tokens: 0, list_price_unavailable: false }
     }
-    return {
+    var period = {
         list_price_usd: finiteNumber(value.list_price_usd),
-        tokens: finiteNumber(value.tokens)
+        tokens: finiteNumber(value.tokens),
+        list_price_unavailable: value.list_price_unavailable === true
     }
+    return period
 }
 
 // The helper reports why a snapshot is incomplete as stable codes, never as

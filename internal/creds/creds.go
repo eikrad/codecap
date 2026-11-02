@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/eikrad/codecap/internal/accounthome"
 	"github.com/eikrad/codecap/internal/httpx"
 )
 
@@ -32,7 +33,7 @@ const (
 	lockTimeout = httpx.Timeout + 5*time.Second
 
 	// The file holds one small JSON object.
-	maxCredentialsBytes = 1 << 20
+	maxCredentialsBytes = accounthome.MaxCredentialsBytes
 
 	// Orphan temp files hold a complete, valid token set.
 	tempFileMaxAge = 5 * time.Minute
@@ -45,50 +46,8 @@ type OAuth struct {
 	ExpiresAt    time.Time
 }
 
-// openCredentials opens the Account Home credentials file, refusing anything
-// that is not a plain file owned by this user.
-//
-// O_NOFOLLOW is the load-bearing part. The path comes from a D-Bus argument, and
-// saveOAuthTokens renames over it — rename replaces a symlink itself, not its
-// target, so following one would read the real tokens and write the refreshed
-// ones into a directory the caller chose.
-func openCredentials(accountHome string) (*os.File, error) {
-	path := filepath.Join(accountHome, CredentialsFileName)
-	// O_NONBLOCK matters as much as O_NOFOLLOW here: opening a FIFO for reading
-	// blocks until a writer appears, which would happen before the regular-file
-	// check below could reject it.
-	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		if errors.Is(err, syscall.ELOOP) {
-			return nil, fmt.Errorf("%w: %s is a symbolic link", ErrCredentialsUnsafe, path)
-		}
-		return nil, fmt.Errorf("read credentials: %w", err)
-	}
-
-	info, err := file.Stat()
-	if err != nil {
-		_ = file.Close()
-		return nil, fmt.Errorf("stat credentials: %w", err)
-	}
-	if !info.Mode().IsRegular() {
-		_ = file.Close()
-		return nil, fmt.Errorf("%w: %s is not a regular file", ErrCredentialsUnsafe, path)
-	}
-	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
-		if int64(stat.Uid) != int64(os.Getuid()) {
-			_ = file.Close()
-			return nil, fmt.Errorf("%w: %s is not owned by this user", ErrCredentialsUnsafe, path)
-		}
-		if uint64(stat.Nlink) != 1 {
-			_ = file.Close()
-			return nil, fmt.Errorf("%w: %s is hard-linked", ErrCredentialsUnsafe, path)
-		}
-	}
-	return file, nil
-}
-
 func readCredentials(accountHome string) ([]byte, error) {
-	file, err := openCredentials(accountHome)
+	file, err := accounthome.OpenCredentials(accountHome, CredentialsFileName)
 	if err != nil {
 		return nil, err
 	}
